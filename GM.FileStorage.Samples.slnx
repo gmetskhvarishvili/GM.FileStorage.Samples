@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/Solution Items/Meta/">
+    <File Path="README.md" />
+    <File Path="CONTRIBUTING.md" />
+    <File Path="LICENSE" />
+  </Folder>
+  <Folder Name="/Solution Items/Build/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+  </Folder>
+  <Folder Name="/Solution Items/CI/">
+    <File Path=".github/workflows/ci.yml" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="GM.FileStorage.Sample.API/GM.FileStorage.Sample.API.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GM.FileStorage.Sample.Tests/GM.FileStorage.Sample.Tests.csproj" />
+  </Folder>
+</Solution>
