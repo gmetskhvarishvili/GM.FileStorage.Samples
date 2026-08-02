@@ -1,13 +1,19 @@
 using GM.FileStorage;
+using GM.FileStorage.AzureBlob;
 using GM.FileStorage.Local;
+using GM.FileStorage.S3;
 using GM.FileStorage.Sample.API;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// FileStorage:Provider picks the backend. Here it's "Local" (disk); reference GM.FileStorage.S3 /
-// .AzureBlob and add their AddGM… calls to switch by config alone.
+// All three backends are registered; FileStorage:Provider (default "Local") decides which one
+// IFileStorageService resolves to — swapping storage is a config change, not a code change. The S3
+// and Azure clients are only constructed when their provider is selected, so the sample runs on
+// disk out of the box with no cloud config.
 builder.Services.AddGMFileStorage(builder.Configuration);
 builder.Services.AddGMLocalFileStorage(builder.Configuration);
+builder.Services.AddGMS3FileStorage(builder.Configuration);
+builder.Services.AddGMAzureBlobFileStorage(builder.Configuration);
 
 // KYC-style tenant/user-scoped keys (replaces the default date-partitioned strategy).
 builder.Services.AddSingleton<IFileKeyStrategy, TenantKeyStrategy>();

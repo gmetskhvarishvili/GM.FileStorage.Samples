@@ -7,8 +7,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="GM.FileStorage" Version="1.0.0" />
-        <PackageReference Include="GM.FileStorage.Local" Version="1.0.0" />
+        <PackageReference Include="GM.FileStorage" Version="1.1.0" />
+        <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
+        <PackageReference Include="GM.FileStorage.Local" Version="1.1.0" />
+        <PackageReference Include="GM.FileStorage.S3" Version="1.1.0" />
+        <PackageReference Include="GM.FileStorage.AzureBlob" Version="1.1.0" />
     </ItemGroup>
 
 </Project>
