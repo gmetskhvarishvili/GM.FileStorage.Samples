@@ -31,15 +31,15 @@ public sealed class FileApiTests : IDisposable
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(fileContent, "file", "passport.pdf");
 
-        var upload = await client.PostAsync("/files?tenantId=acme&userId=u1", form);
+        var upload = await client.PostAsync("/api/v1/files?tenantId=acme&userId=u1", form);
         upload.EnsureSuccessStatusCode();
         var result = await upload.Content.ReadFromJsonAsync<UploadResponse>();
 
         Assert.NotNull(result);
-        Assert.StartsWith("tenants/acme/users/u1/", result!.Key);      // tenant/user-scoped key
+        Assert.StartsWith("tenants/acme/users/u1/", result.Key);      // tenant/user-scoped key
         Assert.Equal(bytes.Length, result.Size);
 
-        var download = await client.GetAsync($"/files/{result.Key}");
+        var download = await client.GetAsync($"/api/v1/files/{result.Key}");
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);
         Assert.Equal(bytes, await download.Content.ReadAsByteArrayAsync());
     }
@@ -48,7 +48,7 @@ public sealed class FileApiTests : IDisposable
     public async Task Download_UnknownKey_Returns404()
     {
         var client = _factory.CreateClient();
-        var response = await client.GetAsync("/files/tenants/x/users/y/does-not-exist.bin");
+        var response = await client.GetAsync("/api/v1/files/tenants/x/users/y/does-not-exist.bin");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 

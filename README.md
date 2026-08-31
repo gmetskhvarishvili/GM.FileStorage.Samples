@@ -27,18 +27,19 @@ presigned links — all behind the provider-agnostic `IFileStorageService`. Targ
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/files?tenantId=&userId=` | Upload a multipart `file`; returns the scoped key + size + checksum |
-| `GET` | `/files/{**key}` | Download the file (streamed) |
-| `DELETE` | `/files/{**key}` | Delete the file |
-| `GET` | `/presign/{**key}` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl`) |
+| `POST` | `/api/v1/files?tenantId=&userId=` | Upload a multipart `file`; returns the scoped key + size + checksum |
+| `GET` | `/api/v1/files/{**key}` | Download the file (streamed) |
+| `DELETE` | `/api/v1/files/{**key}` | Delete the file |
+| `GET` | `/api/v1/presign/{**key}` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl`) |
+| `GET` | `/health/live` / `/health/ready` | Liveness / readiness probes |
 
 ```bash
 dotnet run --project GM.FileStorage.Sample.API
 
-curl -F "file=@passport.pdf" "http://localhost:5xxx/files?tenantId=acme&userId=u1"
+curl -F "file=@passport.pdf" "http://localhost:5xxx/api/v1/files?tenantId=acme&userId=u1"
 # { "key": "tenants/acme/users/u1/9f1c…a3.pdf", "size": 12345, "checksum": "…", "contentType": "application/pdf" }
 
-curl -O "http://localhost:5xxx/files/tenants/acme/users/u1/9f1c…a3.pdf"
+curl -O "http://localhost:5xxx/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`). To run on S3/MinIO

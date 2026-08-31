@@ -3,6 +3,7 @@ using GM.FileStorage.AzureBlob;
 using GM.FileStorage.Local;
 using GM.FileStorage.S3;
 using GM.FileStorage.Sample.API;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,10 +19,17 @@ builder.Services.AddGMAzureBlobFileStorage(builder.Configuration);
 // KYC-style tenant/user-scoped keys (replaces the default date-partitioned strategy).
 builder.Services.AddSingleton<IFileKeyStrategy, TenantKeyStrategy>();
 
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
 
+// Liveness must not depend on downstream dependencies, so it runs no checks; readiness runs
+// every registered health check (none here yet). See engineering baseline §11.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready");
+
 // Upload a file (multipart). tenantId/userId shape the storage key via TenantKeyStrategy.
-app.MapPost("/files", async (IFormFile file, string? tenantId, string? userId, IFileStorageService storage) =>
+app.MapPost("/api/v1/files", async (IFormFile file, string? tenantId, string? userId, IFileStorageService storage) =>
 {
     await using var stream = file.OpenReadStream();
     var meta = await storage.UploadAsync(new FileUploadRequest(stream, file.FileName, file.ContentType ?? "application/octet-stream")
@@ -37,7 +45,7 @@ app.MapPost("/files", async (IFormFile file, string? tenantId, string? userId, I
 }).DisableAntiforgery();
 
 // Download — streams straight from storage, never buffering the whole file.
-app.MapGet("/files/{**key}", async (string key, IFileStorageService storage) =>
+app.MapGet("/api/v1/files/{**key}", async (string key, IFileStorageService storage) =>
 {
     if (!await storage.ExistsAsync(key))
         return Results.NotFound();
@@ -46,20 +54,24 @@ app.MapGet("/files/{**key}", async (string key, IFileStorageService storage) =>
     return Results.Stream(download.Content, download.Metadata.ContentType, download.Metadata.FileName);
 });
 
-app.MapDelete("/files/{**key}", async (string key, IFileStorageService storage) =>
+app.MapDelete("/api/v1/files/{**key}", async (string key, IFileStorageService storage) =>
 {
     await storage.DeleteAsync(key);
     return Results.NoContent();
 });
 
 // A time-limited link (needs FileStorage:Local:PublicBaseUrl for the local dev provider).
-app.MapGet("/presign/{**key}", async (string key, IFileStorageService storage) =>
+app.MapGet("/api/v1/presign/{**key}", async (string key, IFileStorageService storage) =>
 {
     var url = await storage.GetPresignedUrlAsync(key, new PresignedUrlRequest { Expiry = TimeSpan.FromMinutes(10) });
     return Results.Ok(new { url });
 });
 
-app.Run();
+await app.RunAsync();
 
 // Exposed so the test project can boot the app with WebApplicationFactory.
-public partial class Program;
+public partial class Program
+{
+    // Only used as a WebApplicationFactory<Program> marker; never instantiated directly.
+    protected Program() { }
+}
