@@ -9,6 +9,7 @@ namespace GM.FileStorage.Sample.API;
 /// </summary>
 public sealed class TenantKeyStrategy : IFileKeyStrategy
 {
+    /// <inheritdoc />
     public string GenerateKey(FileKeyContext context)
     {
         var tenant = context.Metadata.GetValueOrDefault("tenantId", "public");
