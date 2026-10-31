@@ -6,12 +6,24 @@
         <ImplicitUsings>enable</ImplicitUsings>
     </PropertyGroup>
 
+    <PropertyGroup>
+        <!-- XML docs feed the Swagger UI. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    </PropertyGroup>
+
     <ItemGroup>
+        <!-- Web API host: Serilog, controllers, versioning, Swagger, errors, logging, health, secrets. -->
+        <PackageReference Include="GM.API" Version="2.0.1" />
         <PackageReference Include="GM.FileStorage" Version="1.1.1" />
         <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
         <PackageReference Include="GM.FileStorage.Local" Version="1.1.1" />
         <PackageReference Include="GM.FileStorage.S3" Version="1.1.1" />
         <PackageReference Include="GM.FileStorage.AzureBlob" Version="1.1.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- GM.API's Swagger UI serves these from the content root's Assets folder. -->
+        <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>

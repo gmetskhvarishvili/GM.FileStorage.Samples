@@ -1,0 +1,24 @@
+﻿.topbar {
+    background: #708090 !important;
+}
+.swagger-ui .topbar .link svg {
+    display: none !important;
+}
+
+.swagger-ui .topbar .link::before {
+    content: "";
+    display: inline-block;
+    height: 44px;
+    aspect-ratio: 3 / 1; 
+    background-image: url("swagger-logo.svg");
+    background-repeat: no-repeat;
+    background-size: contain;
+    background-position: center;
+    vertical-align: middle;
+}
+
+.swagger-ui .topbar .download-url-wrapper .select-label span {
+    color: white;
+}
+
+
