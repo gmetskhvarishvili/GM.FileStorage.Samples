@@ -8,6 +8,27 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # A real PostgreSQL so the end-to-end (WAF) tests actually run instead of no-opping. The committed
+    # appsettings.json carries no password, so the job supplies the full connection string below.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: GMFileStorageSample
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: "123456"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d GMFileStorageSample"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ConnectionStrings__ApplicationDatabase: "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+
     steps:
       - uses: actions/checkout@v4
 
