@@ -1,0 +1,29 @@
+# PostgreSQL for the GM.FileStorage sample's catalog (the stored-file + metadata tables).
+#
+#   docker compose up -d
+#
+# Then point the API at it (the committed appsettings.json carries no password):
+#
+#   ConnectionStrings__ApplicationDatabase="Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+#
+# The API applies its migrations on startup, so the schema is created on first run.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gm-filestorage-postgres
+    environment:
+      POSTGRES_DB: GMFileStorageSample
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123456"
+    ports:
+      - "5432:5432"
+    volumes:
+      - gm-filestorage-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d GMFileStorageSample"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gm-filestorage-pgdata:

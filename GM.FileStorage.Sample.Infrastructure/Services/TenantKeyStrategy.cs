@@ -1,6 +1,9 @@
-using GM.FileStorage;
+using GM.FileStorage.Sample.Domain.SeedWork;
+using System;
+using System.Collections.Generic;
+using System.IO;
 
-namespace GM.FileStorage.Sample.API;
+namespace GM.FileStorage.Sample.Infrastructure.Services;
 
 /// <summary>
 /// KYC-style key strategy: scopes every file under its tenant and user, e.g.
@@ -12,8 +15,8 @@ public sealed class TenantKeyStrategy : IFileKeyStrategy
     /// <inheritdoc />
     public string GenerateKey(FileKeyContext context)
     {
-        var tenant = context.Metadata.GetValueOrDefault("tenantId", "public");
-        var user = context.Metadata.GetValueOrDefault("userId", "anon");
+        var tenant = context.Metadata.GetValueOrDefault(StoredFileMetadataNames.TenantId, "public");
+        var user = context.Metadata.GetValueOrDefault(StoredFileMetadataNames.UserId, "anon");
         var extension = Path.GetExtension(context.FileName);
         return $"tenants/{tenant}/users/{user}/{Guid.NewGuid():N}{extension}";
     }

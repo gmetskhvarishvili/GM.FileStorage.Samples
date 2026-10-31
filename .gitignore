@@ -19,3 +19,7 @@ appsettings.Local.json
 *.trx
 *.coverage
 *.coveragexml
+appsecrets.json
+
+## Local file-storage root (FileStorage:Local:RootPath)
+App_Data/

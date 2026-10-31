@@ -3,27 +3,44 @@
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
+        <ImplicitUsings>disable</ImplicitUsings>
     </PropertyGroup>
 
     <PropertyGroup>
-        <!-- XML docs feed the Swagger UI. -->
+        <!--
+          The XML doc file is generated to feed Swagger/OpenAPI, not to enforce documentation.
+          CS1591 (missing XML comment for a public member) is suppressed so the sample's request
+          models and controllers are not required to carry doc comments on every public member.
+        -->
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Web API host: Serilog, controllers, versioning, Swagger, errors, logging, health, secrets. -->
+        <PackageReference Include="Asp.Versioning.Mvc" Version="10.2.1" />
+        <PackageReference Include="FluentValidation" Version="12.1.1" />
+        <!-- Web API host: Serilog, controllers, versioning, Swagger, mediator, errors, logging, health, secrets. -->
         <PackageReference Include="GM.API" Version="2.0.1" />
-        <PackageReference Include="GM.FileStorage" Version="1.1.1" />
-        <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
-        <PackageReference Include="GM.FileStorage.Local" Version="1.1.1" />
-        <PackageReference Include="GM.FileStorage.S3" Version="1.1.1" />
-        <PackageReference Include="GM.FileStorage.AzureBlob" Version="1.1.1" />
+        <PackageReference Include="GM.Mediator" Version="2.0.0" />
+        <PackageReference Include="Mapster" Version="10.0.12" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\GM.FileStorage.Sample.Application\GM.FileStorage.Sample.Application.csproj" />
+        <ProjectReference Include="..\GM.FileStorage.Sample.Infrastructure\GM.FileStorage.Sample.Infrastructure.csproj" />
+        <ProjectReference Include="..\GM.FileStorage.Sample.Persistence\GM.FileStorage.Sample.Persistence.csproj" />
     </ItemGroup>
 
     <ItemGroup>
         <!-- GM.API's Swagger UI serves these from the content root's Assets folder. -->
-        <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Assets\**\*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        </Content>
     </ItemGroup>
 
 </Project>
