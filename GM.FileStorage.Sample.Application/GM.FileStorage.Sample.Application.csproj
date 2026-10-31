@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <DocumentationFile></DocumentationFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\GM.FileStorage.Sample.Common\GM.FileStorage.Sample.Common.csproj" />
+      <ProjectReference Include="..\GM.FileStorage.Sample.Domain\GM.FileStorage.Sample.Domain.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="GM.API.Application" Version="2.0.1" />
+      <!-- IFileStorageService: the handlers store and read the bytes; the catalog rows go through IUnitOfWork. -->
+      <PackageReference Include="GM.FileStorage" Version="1.2.0" />
+      <PackageReference Include="GM.Mediator" Version="2.0.0" />
+      <PackageReference Include="Mapster" Version="10.0.12" />
+    </ItemGroup>
+
+</Project>

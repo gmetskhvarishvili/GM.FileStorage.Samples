@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\GM.FileStorage.Sample.Application\GM.FileStorage.Sample.Application.csproj"/>
+        <ProjectReference Include="..\GM.FileStorage.Sample.Domain\GM.FileStorage.Sample.Domain.csproj"/>
+        <ProjectReference Include="..\GM.FileStorage.Sample.Persistence\GM.FileStorage.Sample.Persistence.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="GM.FileStorage" Version="1.2.0" />
+        <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
+        <PackageReference Include="GM.FileStorage.Local" Version="1.2.0" />
+        <PackageReference Include="GM.FileStorage.S3" Version="1.2.0" />
+        <PackageReference Include="GM.FileStorage.AzureBlob" Version="1.2.0" />
+        <PackageReference Include="GM.HealthChecks.EntityFramework" Version="1.0.2" />
+    </ItemGroup>
+
+</Project>

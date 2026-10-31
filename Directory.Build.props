@@ -15,6 +15,13 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!--
+      Sample-wide analyzer relaxations. These are teaching-code conventions, not defects:
+        CA1848 - source-generated LoggerMessage delegates are a high-throughput micro-optimization;
+                 the sample favours plain structured-template calls for readability.
+    -->
+    <NoWarn>$(NoWarn);CA1848</NoWarn>
   </PropertyGroup>
 
 </Project>

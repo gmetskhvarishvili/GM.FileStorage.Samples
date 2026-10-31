@@ -28,3 +28,8 @@ csharp_prefer_braces = true:suggestion
 dotnet_style_null_propagation = true:suggestion
 dotnet_style_coalesce_expression = true:suggestion
 dotnet_style_readonly_field = true:suggestion
+
+# EF Core generated migrations: relax analyzer rules that are noise on generated code
+# (e.g. CA1861 constant array arguments in CreateIndex calls).
+[**/Migrations/*.cs]
+dotnet_diagnostic.CA1861.severity = none

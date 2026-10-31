@@ -8,12 +8,18 @@
     <File Path=".editorconfig" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
+    <File Path="docker-compose.yml" />
   </Folder>
   <Folder Name="/Solution Items/CI/">
     <File Path=".github/workflows/ci.yml" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="GM.FileStorage.Sample.API/GM.FileStorage.Sample.API.csproj" />
+    <Project Path="GM.FileStorage.Sample.Application/GM.FileStorage.Sample.Application.csproj" />
+    <Project Path="GM.FileStorage.Sample.Common/GM.FileStorage.Sample.Common.csproj" />
+    <Project Path="GM.FileStorage.Sample.Domain/GM.FileStorage.Sample.Domain.csproj" />
+    <Project Path="GM.FileStorage.Sample.Infrastructure/GM.FileStorage.Sample.Infrastructure.csproj" />
+    <Project Path="GM.FileStorage.Sample.Persistence/GM.FileStorage.Sample.Persistence.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GM.FileStorage.Sample.Tests/GM.FileStorage.Sample.Tests.csproj" />

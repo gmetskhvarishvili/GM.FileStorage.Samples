@@ -2,20 +2,21 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
+        <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
 
         <!--
-          Warnings are errors here too (inherited from Directory.Build.props). CA1707 is relaxed
-          for test code only: the mandated test name style is Method_Scenario_ExpectedResult, which
-          uses underscores. This is a naming convention for readable test output, not a defect.
+          CA1707 is relaxed for test code only: the mandated test name style is
+          Method_Scenario_ExpectedResult, which uses underscores by convention.
         -->
-        <NoWarn>$(NoWarn);CA1707</NoWarn>
+        <!-- CA1001: disposal of the WAF is handled via IAsyncLifetime.DisposeAsync, which CA1001 doesn't see. -->
+        <NoWarn>$(NoWarn);CA1707;CA1001</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+        <PackageReference Include="GM.Testing" Version="1.0.1" />
+        <PackageReference Include="GM.Testing.AspNetCore" Version="1.0.1" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
         <PackageReference Include="xunit" Version="2.9.3" />
         <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
@@ -26,6 +27,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\GM.FileStorage.Sample.API\GM.FileStorage.Sample.API.csproj" />
+        <ProjectReference Include="..\..\GM.FileStorage.Sample.Domain\GM.FileStorage.Sample.Domain.csproj" />
     </ItemGroup>
 
 </Project>
