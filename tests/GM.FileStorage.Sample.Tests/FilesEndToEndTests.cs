@@ -87,9 +87,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: a generated key that is just {guid}{ext} (no tenant, user, date or folders), recorded in the catalog.
+        // Upload: a key from FileStorage:KeyTemplate, {category}/{shard}/{id}{ext} — no tenant, user or date.
         var uploaded = await UploadAsync(client, original, "passport.pdf", $"tenantId={_tenantId}&userId=u1");
-        Assert.Matches(@"^[0-9a-f]{32}\.pdf$", uploaded.Key);
+        Assert.Matches(@"^documents/([0-9a-f]{2})/\1[0-9a-f]{30}\.pdf$", uploaded.Key);
         Assert.DoesNotContain(_tenantId, uploaded.Key, StringComparison.Ordinal);
         Assert.Equal(original.Length, uploaded.Size);
         Assert.NotEqual(Guid.Empty, uploaded.Id);
@@ -102,9 +102,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal("u1", listed.Metadata!["userId"]);
         Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
         Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&userId=someone-else"));
-        var keyStart = uploaded.Key[..8];
-        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix={keyStart}"));
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=zz"));
+        // The category folder doubles as a filter.
+        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=documents%2F"));
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=images%2F"));
 
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");

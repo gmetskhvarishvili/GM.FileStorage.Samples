@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
-flat random keys, delete and presigned links through the
+keys organised by file type, delete and presigned links through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
 metadata, so files can be listed by tenant or user, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
@@ -43,7 +43,7 @@ work / domain-event store / actor auditing). The layout mirrors
 ## What it demonstrates
 
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`
-  under a generated key that is just `{guid}{ext}` (`FlatFileKeyStrategy`: no folders, no date). Tenant and user
+  under a key from `FileStorage:KeyTemplate`, `{category}/{shard}/{id}{ext}` (see below). Tenant and user
   aren't part of the key: they travel as upload metadata. It then records a `StoredFile` row plus one
   `StoredFileMetadata` row per pair and saves through the unit of work. If the save fails, the uploaded bytes
   are deleted and the error rethrown, so storage never keeps unreferenced objects.
@@ -62,6 +62,35 @@ work / domain-event store / actor auditing). The layout mirrors
 - **GM.API hosting** — Swagger UI at `/` (styled by `Assets/`), health checks at `/health/live|ready|startup`
   (ready includes the database), request logging that describes upload/download bodies instead of reading
   them, RFC 7807 errors (`NotFoundException` → 404), and secrets layered into configuration.
+
+## Key layout
+
+Generated keys come from `FileStorage:KeyTemplate` in appsettings.json, with no code involved:
+
+```jsonc
+"KeyTemplate": "{category}/{shard}/{id}{ext}"   // → documents/9f/9f1cb2…a3.pdf, images/4e/4e07…png
+```
+
+- **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
+  from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
+  type is rejected, so a renamed `.exe` can't land in `images/`.
+  - The sample builds the key before uploading, from the declared type, so an `application/octet-stream`
+    upload lands in `other/`.
+  - When the library generates the key itself (no versioned storage keys), it uses the detected type
+    instead.
+- **`{shard}` spreads files out.** It's the id's first two characters, so files spread over 256 folders
+  per category and no folder grows huge.
+- **`{id}{ext}` is a random id plus the file's extension, cleaned up.** `{id}` is required, so keys
+  never collide.
+- **Nothing identifying.** Tenant, user and date stay out of the key. They're searchable metadata in
+  the catalog, which is how files are found.
+- **Other layouts are a config change.**
+  - `{date:yyyy/MM}/{id}{ext}` gives date folders.
+  - `{meta:tenantId}/{category}/{id}{ext}` gives per-tenant folders. Metadata values are cleaned
+    before use, so they can't add folders or `..`.
+  - The template is checked at startup, so a typo fails fast.
+
+The category folder also works as a list filter, for example `GET /api/v1/files?keyPrefix=images/`.
 
 ## Keeping storage and the database in step
 
@@ -174,12 +203,12 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 dotnet run --project GM.FileStorage.Sample.API
 
 curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "…", "key": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "…", "key": "documents/9f/9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
 curl "http://localhost:5140/api/v1/files?tenantId=acme"
-curl -O "http://localhost:5140/api/v1/files/9f1cb2…a3.pdf"
-curl -X DELETE "http://localhost:5140/api/v1/files/9f1cb2…a3.pdf"
-curl -X POST "http://localhost:5140/api/v1/restore/9f1cb2…a3.pdf"
+curl -O "http://localhost:5140/api/v1/files/documents/9f/9f1cb2…a3.pdf"
+curl -X DELETE "http://localhost:5140/api/v1/files/documents/9f/9f1cb2…a3.pdf"
+curl -X POST "http://localhost:5140/api/v1/restore/documents/9f/9f1cb2…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO

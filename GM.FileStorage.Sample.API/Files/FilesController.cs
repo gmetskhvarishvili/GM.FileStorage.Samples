@@ -33,7 +33,7 @@ public class FilesController : BaseController
     /// Upload File
     /// </summary>
     /// <remarks>
-    /// Multipart <c>file</c>, stored under a generated key, just <c>{guid}{ext}</c>. <c>tenantId</c> and
+    /// Multipart <c>file</c>, stored under a key from <c>FileStorage:KeyTemplate</c> (<c>documents/9f/9f1c….pdf</c>). <c>tenantId</c> and
     /// <c>userId</c> are recorded as the file's searchable metadata (not part of the key). Send
     /// <c>key</c> to upload to an explicit key instead — uploading to an existing (or deleted) key replaces it.
     /// </remarks>
@@ -214,7 +214,7 @@ public class FilesController : BaseController
         return Ok(result);
     }
 
-    // Generated keys are flat ({guid}{ext}), but an explicit key may contain slashes (docs/a.pdf). A client may send
+    // Keys contain slashes (documents/9f/9f1c….pdf, or an explicit docs/a.pdf). A client may send
     // it as-is or URL-encoded — Swagger UI encodes path parameters, giving docs%2Fa.pdf — and ASP.NET Core leaves
     // %2F encoded in a {**key} route value, so decode it here; both forms then find the same file. (A key with a
     // literal '%' would need it sent as %25.)
