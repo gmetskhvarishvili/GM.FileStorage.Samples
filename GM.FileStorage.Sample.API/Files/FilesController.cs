@@ -2,6 +2,7 @@ using Asp.Versioning;
 using GM.API.Controllers;
 using GM.API.Models;
 using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
+using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
@@ -161,8 +162,11 @@ public class FilesController : BaseController
     /// <summary>
     /// Delete File
     /// </summary>
-    /// <remarks>Removes the bytes from storage and soft-deletes the catalog row (kept as an audit trail).</remarks>
-    /// <param name="key">The file's storage key</param>
+    /// <remarks>
+    /// Marks the file deleted in the catalog; its bytes stay in storage, so <c>POST /restore/{key}</c> brings it
+    /// back as it was.
+    /// </remarks>
+    /// <param name="key">The file's key</param>
     /// <param name="cancellationToken"></param>
     [HttpDelete("files/{**key}", Name = nameof(DeleteFile))]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -172,6 +176,23 @@ public class FilesController : BaseController
         CancellationToken cancellationToken)
     {
         await Mediator.Send(new DeleteFileCommand { Key = key }, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Restore File
+    /// </summary>
+    /// <remarks>Brings a deleted file back with the content and metadata it had; nothing is re-uploaded.</remarks>
+    /// <param name="key">The file's key</param>
+    /// <param name="cancellationToken"></param>
+    [HttpPost("restore/{**key}", Name = nameof(RestoreFile))]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RestoreFile(
+        [FromRoute] string key,
+        CancellationToken cancellationToken)
+    {
+        await Mediator.Send(new RestoreFileCommand { Key = key }, cancellationToken);
         return NoContent();
     }
 

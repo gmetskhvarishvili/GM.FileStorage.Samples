@@ -11,11 +11,12 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.Infrastructure.Jobs;
 
 /// <summary>
-/// Deletes the storage objects nothing should point at any more — abandoned uploads, replaced versions and deleted
-/// files whose immediate delete failed (see <c>StorageCleanup</c>). Each due entry is carried out in its own DI
-/// scope, so one failure doesn't affect the rest; a failed entry backs off and is retried on a later run. An entry
-/// whose storage key a live file still uses is dropped without deleting anything. Runs every minute, guarded by a
-/// distributed lock (by GM.Scheduling), so only one instance cleans at a time.
+/// Deletes the storage objects nothing points at any more — abandoned uploads and replaced versions whose
+/// immediate delete failed (see <c>StorageCleanup</c>). A deleted file keeps its bytes (it can be restored), so
+/// they are never queued. Each due entry is carried out in its own DI scope, so one failure doesn't affect the rest;
+/// a failed entry backs off and is retried on a later run. An entry whose storage key any file row still uses is
+/// dropped without deleting anything. Runs every minute, guarded by a distributed lock (by GM.Scheduling), so only
+/// one instance cleans at a time.
 /// </summary>
 [ScheduledJob(JobName, Cron = "0 * * * * ?")]
 public sealed class StorageCleanupJob(IServiceScopeFactory scopeFactory) : IScheduledJob
@@ -52,8 +53,9 @@ public sealed class StorageCleanupJob(IServiceScopeFactory scopeFactory) : ISche
             if (entry == null)
                 continue; // taken care of since the query (e.g. by the request that queued it)
 
-            // A live file still uses these bytes (it can't normally happen: every upload has its own key); keep them.
-            if (await unitOfWork.StoredFileRepository.ExistsAsync(x => x.StorageKey == entry.StorageKey && !x.IsDeleted, cancellationToken))
+            // A file still uses these bytes — live, or deleted and so restorable — (it can't normally happen: every
+            // upload has its own key); keep them.
+            if (await unitOfWork.StoredFileRepository.ExistsAsync(x => x.StorageKey == entry.StorageKey, cancellationToken))
             {
                 unitOfWork.StorageCleanupRepository.Remove(entry);
                 await unitOfWork.SaveChangesAsync(cancellationToken);

@@ -33,7 +33,7 @@ work / domain-event store / actor auditing). The layout mirrors
 | Project | Role |
 | --- | --- |
 | `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, key prefix, paging), `IUnitOfWork` |
-| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
+| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure`: GM.FileStorage + the Local/S3/AzureBlob providers, `TenantKeyStrategy`, the database readiness check |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
@@ -49,8 +49,9 @@ work / domain-event store / actor auditing). The layout mirrors
   are deleted and the error rethrown, so storage never keeps unreferenced objects.
 - **One row per key.** Uploading to an existing key — even a deleted one — calls `StoredFile.Replace`, which
   restores the row, and syncs the metadata rows (changed, restored, added or soft-removed).
-- **Soft delete.** `DeleteFile` soft-removes the row (kept as an audit trail, visible with `visibility=All`)
-  and then deletes the bytes.
+- **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
+  and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
+  exactly as it was, without a re-upload.
 - **Searchable metadata.** The list filters by tenant/user with `Metadata.Any(...)` sub-queries served by the
   `(name, value)` index, plus key prefix and content type, with GM.API paging (`X-Pagination` header).
 - **Domain events.** `GMStoredFileUploaded/Replaced/Deleted/RestoredDomainEvent`s are written to
@@ -84,11 +85,10 @@ always queued for deletion in the `storage_cleanups` table.
   | Step 4 fails | The old version stays queued. |
 - **Racing uploads to one key.** `StorageKey` is a concurrency token and `Key` is unique, so one
   upload wins and the others get a 400 asking them to retry. Their bytes are cleaned up.
-- **Delete** soft-removes the row and queues its bytes in the same transaction, then deletes them.
-  The catalog never points at missing content.
+- **Delete** only marks the row deleted and keeps its bytes, so nothing is queued and a restore is instant.
 - **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute):
   - It carries out due entries, backing off on failures (1, 2, 4 … minutes, at most an hour).
-  - An entry whose bytes a live file still uses is dropped, not deleted.
+  - An entry whose bytes any file row still uses (live, or deleted and restorable) is dropped, not deleted.
   - Entries are claimed with a concurrency token, so the job and an upload slower than the 15-minute
     grace period can't both act on one.
 
@@ -100,7 +100,8 @@ always queued for deletion in the `storage_cleanups` table.
 | `GET` | `/api/v1/files?tenantId=&userId=&keyPrefix=&contentType=&currentPage=&pageSize=` | Paged list of catalogued files, metadata included |
 | `GET` | `/api/v1/files/{id}` | File details by catalog id (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{**key}` | Download the file (streamed) |
-| `DELETE` | `/api/v1/files/{**key}` | Delete the bytes and soft-delete the row |
+| `DELETE` | `/api/v1/files/{**key}` | Mark the file deleted (the bytes are kept) |
+| `POST` | `/api/v1/restore/{**key}` | Restore a deleted file as it was |
 | `GET` | `/api/v1/presign/{**key}` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
@@ -147,6 +148,7 @@ curl -F "file=@passport.pdf" "http://localhost:5xxx/api/v1/files?tenantId=acme&u
 curl "http://localhost:5xxx/api/v1/files?tenantId=acme"
 curl -O "http://localhost:5xxx/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
 curl -X DELETE "http://localhost:5xxx/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
+curl -X POST "http://localhost:5xxx/api/v1/restore/tenants/acme/users/u1/9f1c…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO
@@ -163,7 +165,7 @@ ConnectionStrings__ApplicationDatabase="Host=localhost;Port=5432;Database=GMFile
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/key prefix → details →
-download → presign → delete (row soft-deleted, bytes gone) → re-upload to the same key restores the row. They
+download → presign → delete (row marked deleted, bytes kept) → restore → re-upload to the same key. They
 need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

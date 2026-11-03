@@ -112,7 +112,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var presign = await client.GetAsync($"/api/v1/presign/{uploaded.Key}");
         Assert.Equal(HttpStatusCode.OK, presign.StatusCode);
 
-        // Delete: the bytes go, the row stays soft-deleted (hidden from list, details, download).
+        // Delete: only marks the row deleted (hidden from list, details, download); the bytes stay for a restore,
+        // and nothing is queued for cleanup — even when the job runs.
         var delete = await client.DeleteAsync($"/api/v1/files/{uploaded.Key}");
         Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{uploaded.Key}")).StatusCode);
@@ -122,8 +123,18 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var deleted = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}?visibility=All");
         Assert.NotNull(deleted);
         Assert.True(deleted.IsDeleted);
-        Assert.Empty(StoredObjects());
         Assert.Empty(await CleanupEntriesAsync());
+        await RunCleanupJobAsync();
+        Assert.Single(StoredObjects());
+
+        // Restore: back exactly as it was, nothing re-uploaded. Restoring a live file is a 404.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/restore/{uploaded.Key}", null)).StatusCode);
+        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Key}"));
+        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/restore/{uploaded.Key}", null)).StatusCode);
+
+        // Delete again before re-uploading below.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Key}")).StatusCode);
 
         // Re-upload to the same key: the same row comes back, with the new content and metadata.
         var replacement = Encoding.UTF8.GetBytes("%PDF-1.7 a newer passport scan");
@@ -139,6 +150,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(replacement.Length, restored.Size);
         Assert.Equal("u2", restored.Metadata!["userId"]);
         Assert.Equal(replacement, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Key}"));
+
+        // A re-upload replaces content, so the deleted version's bytes go: only the new version is stored.
+        Assert.Single(StoredObjects());
 
         // Still one row and one metadata row per name for the key.
         using var scope = _factory.Services.CreateScope();
