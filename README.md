@@ -94,9 +94,9 @@ always queued for deletion in the `storage_cleanups` table.
 
 ## Encryption at rest
 
-Off by default (`FileStorage:Encryption:Enabled: false` in appsettings.json). To turn it on, supply
-these as secrets, never in appsettings.json: in a gitignored `appsecrets.json`, through
-`SECRETS_PROVIDER`, or as environment variables.
+Off by default. The master key is a secret, so it lives in `appsecrets.json` with the other secrets,
+never in appsettings.json. The template, `appsecrets.example.json`, comes with a random demo key
+(`local-dev`). Switch encryption on by setting `Enabled` to `true` in your `appsecrets.json`:
 
 ```jsonc
 // appsecrets.json (gitignored)
@@ -104,12 +104,16 @@ these as secrets, never in appsettings.json: in a gitignored `appsecrets.json`, 
   "FileStorage": {
     "Encryption": {
       "Enabled": true,
-      "ActiveKeyId": "2026-11",
-      "Keys": { "2026-11": "<openssl rand -base64 32>" }
+      "ActiveKeyId": "local-dev",
+      "Keys": { "local-dev": "<base64 of 32 random bytes>" }
     }
   }
 }
 ```
+
+The template's key is public: it's committed. Anything beyond a local demo needs a key of your own,
+generated with `openssl rand -base64 32` and kept safe in your secrets store or password manager. Losing
+the key means losing every file it encrypted.
 
 With it on, every file is encrypted with its own AES-256-GCM key, wrapped by the master key
 (`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Over HTTP nothing changes:
@@ -179,10 +183,13 @@ curl -X POST "http://localhost:5xxx/api/v1/restore/tenants/acme/users/u1/9f1c…
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO
-or Azure Blob, fill in `FileStorage:S3` / `FileStorage:AzureBlob` and set `FileStorage:Provider` to `"S3"` or
-`"AzureBlob"` — no code change. Keep `FileStorage:S3:SecretKey` and `FileStorage:AzureBlob:ConnectionString`
-out of `appsettings.json`: GM.API reads them from `appsecrets.json` or the secrets store named by
-`SECRETS_PROVIDER`.
+or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
+- **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
+- **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
+  - `FileStorage:S3:AccessKey` / `SecretKey`;
+  - `FileStorage:AzureBlob:ConnectionString`.
+
+  Alternatively, keep them in the secrets store named by `SECRETS_PROVIDER`.
 
 ## Testing
 
