@@ -1,5 +1,8 @@
 using FluentValidation;
 using GM.Exceptions;
+using GM.EntityFramework.Domain.Exceptions;
+using GM.FileStorage.Sample.Application.Common;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
@@ -49,7 +52,22 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
     }
 }
 
-public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage)
+/// <remarks>
+/// Storage and the catalog can't share a transaction, so the handler orders its steps so that every failure
+/// leaves at worst unreferenced bytes, and those are always queued for deletion (<see cref="StorageCleanup"/>):
+/// <list type="number">
+/// <item>Queue the new storage key for cleanup (due after a grace period) and save — before any bytes exist.</item>
+/// <item>Upload under that key. Each upload gets its own versioned key, so nothing the catalog points at is ever
+/// overwritten.</item>
+/// <item>In one transaction: point the file row at the new key, sync its metadata, drop the pending entry, and
+/// queue the previous version's key. If this fails, nothing the catalog points at changed; the new bytes are
+/// deleted (or left to the job).</item>
+/// <item>Delete the previous version's bytes; a failure leaves them queued for the job.</item>
+/// </list>
+/// Two uploads racing to the same key can't both win: the row's storage key is a concurrency token (and the key
+/// is unique), so the loser's save fails and it gets a 400 asking it to retry.
+/// </remarks>
+public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
@@ -62,15 +80,27 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
         };
 
-        // FileStorage:MaxFileSize / AllowedContentTypes / VerifyContentType are enforced inside UploadAsync, before
-        // anything is kept; a rejection is the caller's mistake, so it surfaces as a 400 with the reason.
+        var key = string.IsNullOrWhiteSpace(request.Key)
+            ? keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata))
+            : request.Key;
+        var storageKey = StoredFile.NewStorageKey(key);
+
+        // 1. Queue the new storage key before any bytes exist, so a crash after the upload can't strand them.
+        var pending = StorageCleanup.Create(storageKey, DateTime.UtcNow.Add(StorageCleanup.PendingUploadGracePeriod));
+        await unitOfWork.StorageCleanupRepository.AddAsync(pending, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // 2. Store the bytes under their own versioned key. FileStorage:MaxFileSize / AllowedContentTypes /
+        // VerifyContentType are enforced inside UploadAsync before anything is kept; a rejection is the caller's
+        // mistake, so it surfaces as a 400 with the reason. Any other failure leaves the pending entry, and the job
+        // removes whatever was partly written.
         FileMetadata stored;
         try
         {
             stored = await storage.UploadAsync(
                 new FileUploadRequest(request.Content!, request.FileName!, request.ContentType!)
                 {
-                    Key = request.Key,
+                    Key = storageKey,
                     Visibility = FileVisibility.Private,
                     Metadata = metadata,
                 },
@@ -78,52 +108,83 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         }
         catch (Exception ex) when (ex is FileTooLargeException or FileContentTypeNotAllowedException or FileContentTypeMismatchException)
         {
+            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
             throw new BadRequestException(ex.Message);
         }
 
+        // 3. Record it, in one transaction.
+        StoredFile entity;
+        StorageCleanup? previousVersion = null;
         try
         {
             var uploadedAtUtc = stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow;
             var isPublic = stored.Visibility == FileVisibility.Public;
 
-            // One row per key, deleted or not (the key is unique), so look it up regardless of visibility.
-            var entity = await unitOfWork.StoredFileRepository
-                .FirstOrDefaultAsync(x => x.Key == stored.Key, true, null, cancellationToken);
+            // One row per key, deleted or not (the key is unique). Tracked, so the save checks the row still has
+            // the storage key read here (its concurrency token).
+            var existing = await unitOfWork.StoredFileRepository
+                .FirstOrDefaultAsync(x => x.Key == key, false, null, cancellationToken);
 
-            if (entity == null)
+            if (existing == null)
             {
-                entity = StoredFile.Create(stored.Key, stored.FileName, stored.ContentType, stored.Size,
+                entity = StoredFile.Create(key, storageKey, stored.FileName, stored.ContentType, stored.Size,
                     stored.Checksum, isPublic, uploadedAtUtc);
                 await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
             }
             else
             {
-                // New content at the same key: restores the row if it had been deleted.
-                entity.Replace(stored.FileName, stored.ContentType, stored.Size, stored.Checksum, isPublic, uploadedAtUtc);
-                unitOfWork.StoredFileRepository.Update(entity);
+                // New content at the same key (restores the row if it had been deleted); the old bytes stay put
+                // until this is saved, then go.
+                entity = existing;
+                var previousStorageKey = entity.Replace(storageKey, stored.FileName, stored.ContentType, stored.Size,
+                    stored.Checksum, isPublic, uploadedAtUtc);
+                previousVersion = StorageCleanup.Create(previousStorageKey, DateTime.UtcNow);
+                await unitOfWork.StorageCleanupRepository.AddAsync(previousVersion, cancellationToken);
             }
 
             await SyncMetadataAsync(entity.Id, metadata, cancellationToken);
 
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+            // The bytes are referenced now, so they're no longer the pending upload's to clean up. If the job has
+            // already claimed the entry (an upload slower than the grace period), this save fails instead.
+            unitOfWork.StorageCleanupRepository.Remove(pending);
 
-            return new UploadedFileDto
-            {
-                Id = entity.Id,
-                Key = entity.Key,
-                FileName = entity.FileName,
-                ContentType = entity.ContentType,
-                Size = entity.Size,
-                Checksum = entity.Checksum,
-            };
+            await unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
-            // The catalog row was not saved, so don't leave unreferenced bytes behind. (When this replaced an
-            // existing key, its previous content was already overwritten by the upload.)
-            await storage.DeleteAsync(stored.Key, CancellationToken.None);
+            // Not recorded: the catalog still points at whatever it did before, and our bytes are unreferenced.
+            // Delete them now; the pending entry is still queued, so the job retries if this fails.
+            try { await storage.DeleteAsync(storageKey, CancellationToken.None); }
+#pragma warning disable CA1031 // Best effort: the queued entry covers it.
+            catch (Exception) { }
+#pragma warning restore CA1031
+
+            // A lost race: the save failed on the row's storage key (GM's unit of work reports that as a
+            // ConcurrencyException) or on the unique key (two first uploads), and another upload is now the file.
+            if (ex is ConcurrencyException or Microsoft.EntityFrameworkCore.DbUpdateException
+                && await unitOfWork.StoredFileRepository.ExistsAsync(
+                    x => x.Key == key && x.StorageKey != storageKey && !x.IsDeleted, CancellationToken.None))
+            {
+                throw new BadRequestException(
+                    $"Another upload to '{key}' finished first, so this one wasn't saved. Retry the upload.");
+            }
+
             throw;
         }
+
+        // 4. The previous version is unreferenced now; delete it (a failure leaves it queued for the job).
+        if (previousVersion != null)
+            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, previousVersion, CancellationToken.None);
+
+        return new UploadedFileDto
+        {
+            Id = entity.Id,
+            Key = entity.Key,
+            FileName = entity.FileName,
+            ContentType = entity.ContentType,
+            Size = entity.Size,
+            Checksum = entity.Checksum,
+        };
     }
 
     // Makes the file's metadata rows match the upload: changes or restores the rows that exist (a name is unique

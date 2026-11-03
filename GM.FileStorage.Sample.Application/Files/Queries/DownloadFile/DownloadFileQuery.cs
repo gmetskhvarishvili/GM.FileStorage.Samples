@@ -62,8 +62,8 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
             var range = request.Range
                         ?? (request.SuffixLength is { } last ? new FileByteRange(Math.Max(0, entity.Size - last)) : null);
             download = range is { } r
-                ? await storage.DownloadAsync(entity.Key, r, cancellationToken)
-                : await storage.DownloadAsync(entity.Key, cancellationToken);
+                ? await storage.DownloadAsync(entity.StorageKey, r, cancellationToken)
+                : await storage.DownloadAsync(entity.StorageKey, cancellationToken);
         }
         catch (FileStorageObjectNotFoundException)
         {

@@ -1,8 +1,11 @@
 using FluentValidation;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Common.Resources;
+using GM.FileStorage.Sample.Application.Common;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -47,13 +50,15 @@ public class DeleteFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
                 request.Key!);
         }
 
+        // The row goes first, and its bytes are queued for deletion in the same transaction: the catalog never
+        // points at missing content, and if deleting the bytes fails below, the storage-cleanup job retries.
         entity.SoftRemove();
+        var cleanup = StorageCleanup.Create(entity.StorageKey, DateTime.UtcNow);
 
         unitOfWork.StoredFileRepository.Update(entity);
+        await unitOfWork.StorageCleanupRepository.AddAsync(cleanup, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // Bytes go after the row: if this fails the catalog already says "deleted" and only an orphaned object is
-        // left behind, never a row pointing at missing content.
-        await storage.DeleteAsync(entity.Key, cancellationToken);
+        await StorageCleanups.TryCompleteAsync(unitOfWork, storage, cleanup, CancellationToken.None);
     }
 }

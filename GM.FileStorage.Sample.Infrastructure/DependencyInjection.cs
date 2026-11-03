@@ -1,9 +1,12 @@
 using GM.FileStorage.AzureBlob;
 using GM.FileStorage.Local;
 using GM.FileStorage.S3;
+using GM.DistributedLock;
+using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Infrastructure.Services;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.HealthChecks.EntityFramework;
+using GM.Scheduling;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -27,6 +30,12 @@ public static class DependencyInjection
         services.AddSingleton<IFileKeyStrategy, TenantKeyStrategy>();
 
         // Readiness: /health/ready fails while the catalog database is unreachable.
+        // StorageCleanupJob deletes whatever bytes uploads and deletes leave unreferenced (crashes, failed deletes,
+        // replaced versions). The in-memory lock suits one instance; use GM.DistributedLock.Redis when scaling out
+        // so the job still runs once per minute cluster-wide.
+        services.AddGMDistributedLock();
+        services.AddGMScheduling(builder => builder.ScanAssemblies(typeof(StorageCleanupJob).Assembly));
+
         services.AddHealthChecks()
             .AddGMDatabaseCheck<ApplicationDbContext>();
 

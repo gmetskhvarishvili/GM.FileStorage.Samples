@@ -30,14 +30,16 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
 {
     public async Task<FilePresignedUrlDto> Handle(GetFilePresignedUrlQuery request, CancellationToken cancellationToken)
     {
-        var exists = await unitOfWork.StoredFileRepository
-            .ExistsAsync(x => x.Key == request.Key
-                              && x.IsActive
-                              && !x.IsDeleted
-                              && !x.IsHidden,
+        var entity = await unitOfWork.StoredFileRepository
+            .FirstOrDefaultAsync(x => x.Key == request.Key
+                                      && x.IsActive
+                                      && !x.IsDeleted
+                                      && !x.IsHidden,
+                true,
+                null,
                 cancellationToken);
 
-        if (!exists)
+        if (entity == null)
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
@@ -45,9 +47,10 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
                 request.Key!);
         }
 
+        // The link points at the current version's bytes (the file's storage key), not the logical key.
         var expiry = GetFilePresignedUrlQuery.DefaultExpiry;
         var url = await storage.GetPresignedUrlAsync(
-            request.Key!, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
+            entity.StorageKey, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
 
         return new FilePresignedUrlDto { Url = url, ExpiresAtUtc = DateTime.UtcNow.Add(expiry) };
     }

@@ -1,7 +1,10 @@
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
+using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
+using GM.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -64,6 +67,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 await context.Set<StoredFileMetadata>()
                     .Where(x => x.StoredFile.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => x.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
+                await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
             }
             catch { /* best-effort cleanup */ }
         }
@@ -118,7 +122,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var deleted = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}?visibility=All");
         Assert.NotNull(deleted);
         Assert.True(deleted.IsDeleted);
-        Assert.False(File.Exists(Path.Combine(_root, uploaded.Key)));
+        Assert.Empty(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
 
         // Re-upload to the same key: the same row comes back, with the new content and metadata.
         var replacement = Encoding.UTF8.GetBytes("%PDF-1.7 a newer passport scan");
@@ -140,6 +145,114 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Key == uploaded.Key));
         Assert.Equal(2, await context.Set<StoredFileMetadata>().CountAsync(x => x.StoredFileId == uploaded.Id));
+    }
+
+    [Fact]
+    public async Task Replacing_a_file_stores_a_new_version_and_deletes_the_old_one()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var first = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 v1"), "a.pdf", $"tenantId={_tenantId}&userId=u1");
+        var firstObject = Assert.Single(StoredObjects());
+
+        var second = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 version two"), "a.pdf",
+            $"tenantId={_tenantId}&userId=u1&key={Uri.EscapeDataString(first.Key)}");
+
+        // Same file, new bytes in a new place; the old version is gone and nothing is left queued.
+        Assert.Equal(first.Id, second.Id);
+        var secondObject = Assert.Single(StoredObjects());
+        Assert.NotEqual(firstObject, secondObject);
+        Assert.Equal("%PDF-1.7 version two", await client.GetStringAsync($"/api/v1/files/{first.Key}"));
+        Assert.Empty(await CleanupEntriesAsync());
+    }
+
+    [Fact]
+    public async Task Racing_replacements_leave_one_consistent_version()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var original = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 original"), "a.pdf", $"tenantId={_tenantId}&userId=u1");
+
+        var bodies = Enumerable.Range(0, 6).Select(i => $"%PDF-1.7 racer {i}").ToArray();
+        var responses = await Task.WhenAll(bodies.Select(body => PostAsync(client, Encoding.UTF8.GetBytes(body), "a.pdf",
+            "application/pdf", $"&key={Uri.EscapeDataString(original.Key)}")));
+
+        // Every racer either won (200) or was told to retry (400); none corrupted the file.
+        Assert.All(responses, r => Assert.Contains(r.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest }));
+        Assert.Contains(responses, r => r.StatusCode == HttpStatusCode.OK);
+        var current = await client.GetStringAsync($"/api/v1/files/{original.Key}");
+        Assert.Contains(current, bodies);
+
+        // Whatever a loser left behind is queued; once the job runs, only the current version's bytes remain.
+        await RunCleanupJobAsync();
+        Assert.Single(StoredObjects());
+        Assert.Equal(current, await client.GetStringAsync($"/api/v1/files/{original.Key}"));
+    }
+
+    [Fact]
+    public async Task The_cleanup_job_removes_abandoned_bytes_but_keeps_live_ones()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var live = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 live"), "live.pdf", $"tenantId={_tenantId}&userId=u1");
+
+        // An upload that died after storing its bytes but before recording them: bytes plus a pending entry.
+        var abandonedKey = $"{KeyPrefix}users/u1/abandoned.pdf~{Guid.NewGuid():N}";
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var storage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+            await storage.UploadAsync(new FileUploadRequest(new MemoryStream(Encoding.UTF8.GetBytes("%PDF-1.7 orphan")), "abandoned.pdf", "application/pdf")
+            {
+                Key = abandonedKey,
+            });
+
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var liveStorageKey = await context.Set<StoredFile>().Where(x => x.Id == live.Id).Select(x => x.StorageKey).SingleAsync();
+            context.Add(StorageCleanup.Create(abandonedKey, DateTime.UtcNow.AddSeconds(-1)));
+            // A stray entry for bytes a live file still uses must not delete them.
+            context.Add(StorageCleanup.Create(liveStorageKey, DateTime.UtcNow.AddSeconds(-1)));
+            await context.SaveChangesAsync();
+        }
+        Assert.Equal(2, StoredObjects().Length);
+
+        await RunCleanupJobAsync();
+
+        Assert.Single(StoredObjects());
+        Assert.Equal("%PDF-1.7 live", await client.GetStringAsync($"/api/v1/files/{live.Key}"));
+        Assert.Empty(await CleanupEntriesAsync());
+    }
+
+    // The data files under this test's tenant (not the local provider's .gmmeta sidecars).
+    private string[] StoredObjects()
+    {
+        var dir = Path.Combine(_root, KeyPrefix);
+        return Directory.Exists(dir)
+            ? Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith(".gmmeta", StringComparison.Ordinal)).ToArray()
+            : [];
+    }
+
+    private async Task<List<StorageCleanup>> CleanupEntriesAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix)).ToListAsync();
+    }
+
+    // Makes this test's queued entries due and runs the job once, as the scheduler would.
+    private async Task RunCleanupJobAsync()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.DueAtUtc, DateTime.UtcNow.AddSeconds(-1)));
+        }
+
+        var job = new StorageCleanupJob(_factory.Services.GetRequiredService<IServiceScopeFactory>());
+        await job.ExecuteAsync(new JobExecutionContext { JobName = StorageCleanupJob.JobName, FireTimeUtc = DateTimeOffset.UtcNow }, default);
     }
 
     [Fact]
@@ -208,13 +321,13 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
     }
 
-    private async Task<HttpResponseMessage> PostAsync(HttpClient client, byte[] bytes, string fileName, string contentType)
+    private async Task<HttpResponseMessage> PostAsync(HttpClient client, byte[] bytes, string fileName, string contentType, string extraQuery = "")
     {
         using var form = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(bytes);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         form.Add(fileContent, "file", fileName);
-        return await client.PostAsync($"/api/v1/files?tenantId={_tenantId}&userId=u1", form);
+        return await client.PostAsync($"/api/v1/files?tenantId={_tenantId}&userId=u1{extraQuery}", form);
     }
 
     private static async Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName, string query)

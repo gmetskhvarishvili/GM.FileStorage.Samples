@@ -62,6 +62,36 @@ work / domain-event store / actor auditing). The layout mirrors
   (ready includes the database), request logging that describes upload/download bodies instead of reading
   them, RFC 7807 errors (`NotFoundException` → 404), and secrets layered into configuration.
 
+## Keeping storage and the database in step
+
+The bytes (in `IFileStorageService`) and the catalog row (in Postgres) can't share a transaction. The
+sample orders its steps so that any failure leaves at worst bytes nothing points at, and those are
+always queued for deletion in the `storage_cleanups` table.
+
+- **Versioned storage keys.** Every upload is stored under its own key, `{key}~{version}`, recorded
+  as `StoredFile.StorageKey`. A replacement never overwrites bytes the catalog still points at.
+- **Upload** ([UploadFileCommand](GM.FileStorage.Sample.Application/Files/Commands/UploadFile/UploadFileCommand.cs)):
+  1. Queue the new storage key for cleanup, due in 15 minutes, before any bytes exist.
+  2. Upload the bytes.
+  3. In one transaction: point the row at the new key, sync its metadata, drop the queued entry,
+     and queue the previous version's key.
+  4. Delete the previous version.
+
+  | If this happens… | …the result |
+  | --- | --- |
+  | A crash after step 2 | The bytes are unreferenced and queued; the job deletes them. |
+  | Step 3 fails | The row is unchanged, and the new bytes are deleted (or left queued). |
+  | Step 4 fails | The old version stays queued. |
+- **Racing uploads to one key.** `StorageKey` is a concurrency token and `Key` is unique, so one
+  upload wins and the others get a 400 asking them to retry. Their bytes are cleaned up.
+- **Delete** soft-removes the row and queues its bytes in the same transaction, then deletes them.
+  The catalog never points at missing content.
+- **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute):
+  - It carries out due entries, backing off on failures (1, 2, 4 … minutes, at most an hour).
+  - An entry whose bytes a live file still uses is dropped, not deleted.
+  - Entries are claimed with a concurrency token, so the job and an upload slower than the 15-minute
+    grace period can't both act on one.
+
 ## Endpoints
 
 | Method | Route | Purpose |
