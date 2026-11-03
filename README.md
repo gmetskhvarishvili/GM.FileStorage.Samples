@@ -208,10 +208,11 @@ Through the gateway, the same routes are on `https://localhost:7141`. Uploads ar
 
 ## Database setup
 
-The catalog lives in PostgreSQL, database `GMFileStorageSample`. Start one with Docker:
+The catalog lives in PostgreSQL, database `GMFileStorageSample`. To run the projects with `dotnet run`, start just
+the database with Docker (to run everything in Docker instead, see [Running in Docker](#running-in-docker)):
 
 ```bash
-docker compose up -d   # postgres:16 on localhost:5432, user postgres / password 123456
+docker compose up -d postgres   # postgres:16 on localhost:5432, user postgres / password 123456
 ```
 
 The connection string lives in **`appsecrets.json`** of the API and of the worker, not in `appsettings.json`.
@@ -287,6 +288,21 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 
   Alternatively, keep them in the secrets store named by `SECRETS_PROVIDER`.
 
+## Running in Docker
+
+`docker-compose.yml` runs the whole sample: PostgreSQL, the API, the worker and the gateway, built from the one
+`Dockerfile` (its `PROJECT` build argument picks the host).
+
+```bash
+docker compose up -d --build
+```
+
+The gateway, and so Swagger UI, is on **http://localhost:8080**; the API isn't published, so every call goes through
+the gateway's routes and rate limits, as in production. Inside the network the services talk plain HTTP. The
+connection string comes from environment variables in the compose file instead of `appsecrets.json`, and the API and
+worker share the `gm-filestorage-files` volume as their storage root. `docker compose down -v` removes everything,
+volumes included.
+
 ## Testing
 
 ```bash
@@ -296,10 +312,19 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
-per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a 3 MB upload
-streamed intact, an oversized upload refused after reading little more than the limit, range requests, the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They
-need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
+per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
+3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
+the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They need PostgreSQL and
+**no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
+
+`GatewayTests` (`tests/GM.FileStorage.Sample.Gateway.Tests`) run the gateway as configured in its appsettings.json in
+front of a stub API on a real port: which requests are forwarded (bodies and `Range` included) and which aren't,
+the 30-a-minute upload limit with `429` + `Retry-After` while reads keep their own limit, readiness following the
+API, and Swagger UI served by the gateway itself. They need nothing running.
+
+CI also builds the Docker images and runs `docker compose up`, then uploads, lists and downloads a file through the
+gateway and checks the API and worker share the storage volume.
 
 ## License
 

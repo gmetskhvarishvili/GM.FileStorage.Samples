@@ -60,3 +60,6 @@ app.MapGMHealthChecks();
 app.MapGMGateway();
 
 await app.RunAsync();
+
+// Exposes the implicit top-level Program class to the gateway tests (GmWebApplicationFactory<Program>).
+public partial class Program;
