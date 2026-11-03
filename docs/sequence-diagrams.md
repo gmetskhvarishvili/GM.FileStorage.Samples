@@ -17,7 +17,7 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -100,6 +100,7 @@ sequenceDiagram
     participant DB
     participant S as Storage
 
+    API->>API: more than one file in the form? → 400 (use /files/batch)
     API->>API: validate (file name, content type, ids)
     API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
@@ -129,6 +130,53 @@ sequenceDiagram
 
 If the API crashes between the upload and the commit, the bytes exist but nothing points at them. The queued
 entry falls due 15 minutes later and the worker deletes them.
+
+## Batch upload — sequence
+
+`POST /api/v1/files/batch`
+
+```mermaid
+---
+title: Batch upload — sequence
+---
+sequenceDiagram
+    autonumber
+    participant C as FilesController
+    participant B as UploadFilesCommandHandler
+    participant U as UploadFileCommand<br/>(validation + handler)
+    participant DB
+    participant S as Storage
+
+    C->>C: open a stream per file (already buffered by ASP.NET)
+    C->>B: UploadFilesCommand (files, tenantId, userId)
+    B->>B: validate: 1 to 20 files, ids
+    alt invalid
+        B-->>C: ValidationException → 400
+    end
+    loop each file, in the order sent
+        B->>U: UploadFileCommand (same tenant and user)
+        U->>DB: queue the storage key
+        U->>S: upload (rules checked)
+        U->>DB: one transaction: file row, metadata, drop the queued entry
+        alt stored
+            U-->>B: id, storageKey, …
+            B->>B: result: succeeded
+        else validation or upload rule failed
+            U-->>B: ValidationException / BadRequestException
+            B->>B: result: failed, with the reason
+        else anything else
+            U-->>B: exception
+            B->>B: log it, result: failed, "try again"
+        end
+    end
+    B-->>C: one result per file
+    C->>C: dispose the streams
+    C-->>C: 200 [results]
+```
+
+Every file goes through the full single-file sequence above, in its own transaction, so a failure leaves the files
+before and after it untouched. A cancelled request (the client disconnects) stops the batch; the files already
+stored stay.
 
 ## List — sequence
 

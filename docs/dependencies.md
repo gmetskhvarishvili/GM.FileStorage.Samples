@@ -180,6 +180,7 @@ classDiagram
 
     class FilesController {
         +UploadFile()
+        +UploadFiles()
         +GetFilesList()
         +GetFileDetails()
         +DownloadFile()
@@ -189,6 +190,7 @@ classDiagram
     }
     class IMediator
     class UploadFileCommandHandler
+    class UploadFilesCommandHandler
     class DeleteFileCommandHandler
     class RestoreFileCommandHandler
     class GetFilesListQueryHandler
@@ -216,6 +218,8 @@ classDiagram
 
     FilesController --> IMediator
     IMediator ..> UploadFileCommandHandler
+    IMediator ..> UploadFilesCommandHandler
+    UploadFilesCommandHandler --> IMediator : one UploadFileCommand per file
     IMediator ..> DeleteFileCommandHandler
     IMediator ..> RestoreFileCommandHandler
     IMediator ..> GetFilesListQueryHandler
@@ -240,6 +244,8 @@ classDiagram
 ```
 
 Delete, list and details touch only the catalog. Restore asks storage too, to check the bytes are still there.
+The batch handler touches neither: it sends one `UploadFileCommand` per file back through the mediator, so each
+file gets the same validation, rules and ordering as a single upload.
 
 ## Domain model — class diagram
 

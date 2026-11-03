@@ -3,7 +3,7 @@
 What a caller can do with a file, and every outcome they can get back. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
 All diagrams: [index](README.md)
 
 ## File lifecycle — state diagram
@@ -44,7 +44,7 @@ flowchart TD
     req([Request to :7141]) --> route{Matches a route?}
     route -- no --> nf404[404 Not Found]
     route -- yes --> policy{Which policy?}
-    policy -- POST /files --> up{Under 30 uploads<br/>this minute for this IP?}
+    policy -- POST /files or /files/batch --> up{Under 30 uploads<br/>this minute for this IP?}
     policy -- other /files routes --> api{Under 300 requests<br/>this minute for this IP?}
     policy -- /swagger/** --> fwd
     up -- no --> r429[429 Too Many Requests<br/>+ Retry-After]
@@ -56,7 +56,8 @@ flowchart TD
     down -- yes --> flows([The flows below])
 ```
 
-Bodies over 60 MB are refused (`413`) by the gateway and by the API.
+Bodies over 60 MB are refused (`413`) by the gateway and by the API. A batch counts as one upload, however many
+files it holds.
 
 ## Upload — user flow
 
@@ -65,7 +66,9 @@ Bodies over 60 MB are refused (`413`) by the gateway and by the API.
 title: Upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> valid{File name, content type<br/>and ids valid?}
+    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> one{Exactly one file?}
+    one -- no, several --> m400[400 use /files/batch<br/>nothing stored]
+    one -- yes --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
     valid -- yes --> rules{Upload rules pass?<br/>size · allowed type · bytes match type}
     rules -- no --> r400[400 with the reason<br/>nothing kept]
@@ -77,6 +80,32 @@ flowchart TD
 ```
 
 Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
+
+## Batch upload — user flow
+
+```mermaid
+---
+title: Batch upload — user flow
+---
+flowchart TD
+    start([POST /api/v1/files/batch<br/>multipart files, tenantId?, userId?]) --> count{1 to 20 files?}
+    count -- no --> c400[400<br/>nothing stored]
+    count -- yes --> each[[For each file, in order]]
+    each --> one{Stored as<br/>POST /files would?}
+    one -- yes --> okItem[succeeded: true<br/>file: id, storageKey, …]
+    one -- "no: validation or upload rule" --> badItem[succeeded: false<br/>error: the reason]
+    one -- "no: server fault" --> errItem[succeeded: false<br/>error: try again]
+    okItem --> more{More files?}
+    badItem --> more
+    errItem --> more
+    more -- yes --> each
+    more -- no --> ok[200 one result per file,<br/>in the order sent]
+    ok --> retry([Resend only the failed ones])
+```
+
+Each file is a file of its own, with its own id, stored exactly as a single upload. One bad file doesn't stop the
+others, so the response is `200` even when some (or all) files failed: check `succeeded` on each result. The whole
+request is still capped at 60 MB.
 
 ## List — user flow
 
@@ -182,6 +211,7 @@ journey
     title Typical session — user journey
     section Store
       Upload passport.pdf: 5: Caller
+      Upload the other scans in one batch: 4: Caller
       Find it by tenant: 4: Caller
       Check its details: 4: Caller
     section Use

@@ -3,7 +3,9 @@ using GM.API.Controllers;
 using GM.API.Models;
 using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
 using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
+using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
+using GM.FileStorage.Sample.Application.Files.Commands.UploadFiles;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFilePresignedUrl;
@@ -13,6 +15,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,8 +23,8 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
-/// Files Controller — upload, list, inspect, download, delete, restore and presign files. A file's content never
-/// changes after upload; new content is a new file. A file is
+/// Files Controller — upload (one file or a batch), list, inspect, download, delete, restore and presign files. A
+/// file's content never changes after upload; new content is a new file. A file is
 /// identified by one GUID (its id); its bytes are stored under folders laid out by <c>FileStorage:KeyTemplate</c>,
 /// and responses show the stored object's name as <c>storageKey</c> (e.g. <c>9f1c….pdf</c>). The bytes live in the storage provider
 /// behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus its
@@ -36,9 +39,9 @@ public class FilesController : BaseController
     /// Upload File
     /// </summary>
     /// <remarks>
-    /// Multipart <c>file</c>. Creates a new file identified by a GUID; its bytes are stored under a folder path from
-    /// <c>FileStorage:KeyTemplate</c>, the stored name returned as <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are
-    /// recorded as the file's searchable metadata.
+    /// Multipart <c>file</c>: exactly one (for several, use <c>POST files/batch</c>). Creates a new file identified by
+    /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c>, the stored name returned as
+    /// <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are recorded as the file's searchable metadata.
     /// </remarks>
     /// <param name="file">The file to store</param>
     /// <param name="request">Tenant and user (query string)</param>
@@ -47,22 +50,77 @@ public class FilesController : BaseController
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadFile(
         IFormFile file,
         [FromQuery] UploadFileModel request,
         CancellationToken cancellationToken)
     {
-        // Streamed from the request straight into storage; never buffered whole.
+        // Model binding would take the first file and quietly drop the rest; refuse instead, so nothing is lost.
+        if (Request.Form.Files.Count > 1)
+        {
+            throw new BadRequestException(
+                $"This endpoint stores one file, but {Request.Form.Files.Count} were sent. Use POST api/v1/files/batch for several.");
+        }
+
+        // ASP.NET has already buffered the multipart body (in memory, or on disk past 64 KB); from there the file is
+        // streamed into storage.
         await using var stream = file.OpenReadStream();
 
         var command = request.Adapt<UploadFileCommand>();
         command.Content = stream;
         command.FileName = file.FileName;
-        command.ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+        command.ContentType = ContentTypeOf(file);
 
         var response = await Mediator.Send(command, cancellationToken);
         var result = response.Adapt<UploadedFileModel>();
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Upload Files
+    /// </summary>
+    /// <remarks>
+    /// Multipart <c>files</c>: 1 to 20 files, all for the same <c>tenantId</c> and <c>userId</c>. Each is stored as
+    /// <c>POST files</c> would store it, with its own id. The response lists every file in the order sent, with the
+    /// stored file or the reason it wasn't stored; one file failing doesn't stop the others. The whole request is
+    /// still capped at the server's body limit (60 MB).
+    /// </remarks>
+    /// <param name="files">The files to store</param>
+    /// <param name="request">Tenant and user (query string)</param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>One result per file, in the order sent</returns>
+    [HttpPost("files/batch", Name = nameof(UploadFiles))]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(IEnumerable<UploadFileResultModel>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UploadFiles(
+        List<IFormFile> files,
+        [FromQuery] UploadFileModel request,
+        CancellationToken cancellationToken)
+    {
+        var streams = new List<Stream>(files.Count);
+        try
+        {
+            var command = new UploadFilesCommand { TenantId = request.TenantId, UserId = request.UserId };
+            var items = new List<UploadFilesItem>(files.Count);
+            foreach (var file in files)
+            {
+                var stream = file.OpenReadStream();
+                streams.Add(stream);
+                items.Add(new UploadFilesItem { Content = stream, FileName = file.FileName, ContentType = ContentTypeOf(file) });
+            }
+            command.Files = items;
+
+            var response = await Mediator.Send(command, cancellationToken);
+            var result = response.Adapt<IEnumerable<UploadFileResultModel>>();
+            return Ok(result);
+        }
+        finally
+        {
+            foreach (var stream in streams)
+                await stream.DisposeAsync();
+        }
     }
 
     /// <summary>
@@ -216,4 +274,7 @@ public class FilesController : BaseController
         var result = response.Adapt<PresignedUrlModel>();
         return Ok(result);
     }
+
+    private static string ContentTypeOf(IFormFile file) =>
+        string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
 }

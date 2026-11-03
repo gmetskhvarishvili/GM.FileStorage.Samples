@@ -270,6 +270,70 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Batch_upload_stores_each_file_and_reports_the_ones_it_refused()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        var response = await SendFilesAsync(client, $"/api/v1/files/batch?tenantId={_tenantId}&userId=u1",
+            ("a.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 a")),
+            ("page.html", "text/html", Encoding.UTF8.GetBytes("<html></html>")),
+            ("b.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", [(byte)'P', (byte)'K', 3, 4, 20, 0]));
+
+        // One result per file, in the order sent: the refused file doesn't stop the one after it.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var results = await response.Content.ReadFromJsonAsync<List<UploadResultResponse>>();
+        Assert.NotNull(results);
+        Assert.Equal(["a.pdf", "page.html", "b.docx"], results.Select(r => r.FileName));
+        Assert.Equal([true, false, true], results.Select(r => r.Succeeded));
+        Assert.Contains("text/html", results[1].Error);
+        Assert.Null(results[1].File);
+
+        // Each stored file is a file of its own, under the batch's tenant and user.
+        var listed = await ListAsync(client, $"tenantId={_tenantId}&userId=u1");
+        Assert.Equal(new[] { results[0].File!.Id, results[2].File!.Id }.Order(), listed.Select(f => f.Id).Order());
+        Assert.Equal("%PDF-1.7 a", await client.GetStringAsync($"/api/v1/files/{results[0].File!.Id}/content"));
+        Assert.Equal(2, StoredObjects().Length);
+        Assert.Empty(await CleanupEntriesAsync());
+    }
+
+    [Fact]
+    public async Task Upload_refuses_more_than_one_file_instead_of_dropping_them()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var response = await SendFilesAsync(client, $"/api/v1/files?tenantId={_tenantId}",
+            ("a.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 a")),
+            ("b.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 b")));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("files/batch", await response.Content.ReadAsStringAsync());
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(StoredObjects());
+    }
+
+    [Fact]
+    public async Task Batch_upload_needs_between_one_and_twenty_files()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var url = $"/api/v1/files/batch?tenantId={_tenantId}";
+
+        var tooMany = Enumerable.Range(0, 21)
+            .Select(i => ($"f{i}.pdf", "application/pdf", Encoding.UTF8.GetBytes($"%PDF-1.7 {i}")))
+            .ToArray();
+        Assert.Equal(HttpStatusCode.BadRequest, (await SendFilesAsync(client, url, tooMany)).StatusCode);
+
+        using var empty = new MultipartFormDataContent { { new StringContent("x"), "note" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(url, empty)).StatusCode);
+
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(StoredObjects());
+    }
+
+    [Fact]
     public async Task Upload_rejects_files_that_break_the_upload_rules()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
@@ -349,6 +413,20 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         return await client.SendAsync(request);
     }
 
+    // Several files in one multipart request: "files" parts for the batch endpoint, "file" parts for the single one.
+    private static async Task<HttpResponseMessage> SendFilesAsync(
+        HttpClient client, string url, params (string FileName, string ContentType, byte[] Bytes)[] files)
+    {
+        using var form = new MultipartFormDataContent();
+        foreach (var (fileName, contentType, bytes) in files)
+        {
+            var part = new ByteArrayContent(bytes);
+            part.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+            form.Add(part, url.Contains("/batch", StringComparison.Ordinal) ? "files" : "file", fileName);
+        }
+        return await client.PostAsync(url, form);
+    }
+
     private static async Task<List<StoredFileResponse>> ListAsync(HttpClient client, string query)
     {
         var result = await client.GetFromJsonAsync<List<StoredFileResponse>>($"/api/v1/files?{query}");
@@ -357,6 +435,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+
+    private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);
 
     private sealed record StoredFileResponse(
         Guid Id,

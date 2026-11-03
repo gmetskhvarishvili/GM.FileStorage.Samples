@@ -77,6 +77,9 @@ flowchart LR
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
   storage never keeps unreferenced objects.
+- **Batch uploads.** `POST /files/batch` takes up to 20 files and stores each as a single upload would (its own
+  id, rules and transaction), answering with one result per file. A file that fails doesn't stop the rest, so a
+  client resends only the failed ones. The single-file endpoint refuses several files instead of dropping them.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
@@ -181,7 +184,8 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=` | Upload a multipart `file`; returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
+| `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file` (several → 400); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
+| `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`; returns one result per file, in order: the stored file, or why it wasn't stored |
 | `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
@@ -254,6 +258,9 @@ Then call the gateway:
 curl -F "file=@passport.pdf" "https://localhost:7141/api/v1/files?tenantId=acme&userId=u1"
 # { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
+curl -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch?tenantId=acme&userId=u1"
+# [ { "fileName": "visa.pdf", "succeeded": true, "file": { "id": "…", … } }, { "fileName": "contract.docx", … } ]
+
 curl "https://localhost:7141/api/v1/files?tenantId=acme"
 curl -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
 curl -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
@@ -280,8 +287,9 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
-download → presign → delete (row marked deleted, bytes kept) → restore, and check that `PUT` on a file's
-content is refused (405). They
+download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
+per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, range
+requests, the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They
 need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

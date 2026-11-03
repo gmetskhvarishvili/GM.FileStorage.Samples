@@ -150,6 +150,12 @@
   <data name="StoredFile" xml:space="preserve">
     <value>Stored File</value>
   </data>
+  <data name="Succeeded" xml:space="preserve">
+    <value>Succeeded</value>
+  </data>
+  <data name="Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
   <data name="TenantId" xml:space="preserve">
     <value>Tenant Id</value>
   </data>

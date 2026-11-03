@@ -148,7 +148,25 @@ namespace GM.FileStorage.Sample.Common.Resources {
                 return ResourceManager.GetString("Size", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Looks up a localized string similar to Succeeded.
+        /// </summary>
+        public static string Succeeded {
+            get {
+                return ResourceManager.GetString("Succeeded", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Error.
+        /// </summary>
+        public static string Error {
+            get {
+                return ResourceManager.GetString("Error", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to Stored File.
         /// </summary>
