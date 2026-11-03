@@ -14,14 +14,14 @@ public class GetFilePresignedUrlQuery : IRequest<FilePresignedUrlDto>
 {
     public static readonly TimeSpan DefaultExpiry = TimeSpan.FromMinutes(10);
 
-    public string? Key { get; set; }
+    public Guid Id { get; set; }
 }
 
 public class GetFilePresignedUrlQueryValidator : AbstractValidator<GetFilePresignedUrlQuery>
 {
     public GetFilePresignedUrlQueryValidator()
     {
-        RuleFor(x => x.Key).NotNull().NotEmpty();
+        RuleFor(x => x.Id).NotEmpty();
     }
 }
 
@@ -30,24 +30,37 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
 {
     public async Task<FilePresignedUrlDto> Handle(GetFilePresignedUrlQuery request, CancellationToken cancellationToken)
     {
-        var exists = await unitOfWork.StoredFileRepository
-            .ExistsAsync(x => x.Key == request.Key
-                              && x.IsActive
-                              && !x.IsDeleted
-                              && !x.IsHidden,
+        var entity = await unitOfWork.StoredFileRepository
+            .FirstOrDefaultAsync(x => x.Id == request.Id
+                                      && x.IsActive
+                                      && !x.IsDeleted
+                                      && !x.IsHidden,
+                true,
+                null,
                 cancellationToken);
 
-        if (!exists)
+        if (entity == null)
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
+        // The link points at the current version's bytes (the file's storage key), not the logical key.
+        // Some setups can't hand out direct links: encrypted storage (a link would serve ciphertext) or the local
+        // provider without a PublicBaseUrl. That's a 400 with the reason; download through the API instead.
         var expiry = GetFilePresignedUrlQuery.DefaultExpiry;
-        var url = await storage.GetPresignedUrlAsync(
-            request.Key!, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
+        Uri url;
+        try
+        {
+            url = await storage.GetPresignedUrlAsync(
+                entity.StorageKey, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new BadRequestException(ex.Message);
+        }
 
         return new FilePresignedUrlDto { Url = url, ExpiresAtUtc = DateTime.UtcNow.Add(expiry) };
     }

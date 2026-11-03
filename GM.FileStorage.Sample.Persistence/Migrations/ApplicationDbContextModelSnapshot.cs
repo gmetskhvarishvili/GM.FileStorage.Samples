@@ -118,6 +118,40 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                     b.ToTable("domain_events", "domain_events");
                 });
 
+            modelBuilder.Entity("GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.StorageCleanup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTime>("DueAtUtc")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("due_at_utc");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("storage_key");
+
+                    b.HasKey("Id")
+                        .HasName("pk_storage_cleanups");
+
+                    b.HasIndex("DueAtUtc")
+                        .HasDatabaseName("ix_storage_cleanups_due_at_utc");
+
+                    b.HasIndex("StorageKey")
+                        .HasDatabaseName("ix_storage_cleanups_storage_key");
+
+                    b.ToTable("storage_cleanups", "file_storage");
+                });
+
             modelBuilder.Entity("GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.StoredFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -176,6 +210,12 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("size");
 
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("storage_key");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -194,6 +234,10 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                     b.HasIndex("Key")
                         .IsUnique()
                         .HasDatabaseName("ix_stored_files_key");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_stored_files_storage_key");
 
                     b.HasIndex("UploadedAtUtc")
                         .HasDatabaseName("ix_stored_files_uploaded_at_utc");

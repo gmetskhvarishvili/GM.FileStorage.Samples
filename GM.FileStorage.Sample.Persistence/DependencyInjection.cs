@@ -1,4 +1,5 @@
 using GM.EntityFramework.Persistence;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.SeedWork;
@@ -30,9 +31,10 @@ public static class DependencyInjection
 
         services.AddTransient<IStoredFileRepository, StoredFileRepository>();
         services.AddTransient<IStoredFileMetadataRepository, StoredFileMetadataRepository>();
+        services.AddTransient<IStorageCleanupRepository, StorageCleanupRepository>();
         services.AddTransient<IUnitOfWork, UnitOfWork.UnitOfWork>();
 
-        // Dispatches domain events raised by aggregates (GMStoredFileUploaded/Replaced/Deleted, …) to their
+        // Dispatches domain events raised by aggregates (GMStoredFileUploaded/Deleted/Restored, …) to their
         // in-process IDomainEventHandler<>s after ApplicationDbContext.SaveChangesAsync persists them. The sample
         // registers no handlers; the events still land in the durable domain_events log.
         services.AddDomainEventDispatcher();

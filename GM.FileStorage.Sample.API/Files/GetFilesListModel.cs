@@ -21,9 +21,9 @@ public class GetFilesListModel : GetBaseListModel
     [Display(ResourceType = typeof(StringResource), Name = "UserId")]
     public string? UserId { get; set; }
 
-    /// <summary>Only files whose storage key starts with this (e.g. <c>tenants/acme/</c>).</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "KeyPrefix")]
-    public string? KeyPrefix { get; set; }
+    /// <summary>Only files stored under this folder (e.g. <c>images/</c> for every image).</summary>
+    [Display(ResourceType = typeof(StringResource), Name = "Folder")]
+    public string? Folder { get; set; }
 
     /// <summary>Only files of this MIME type.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "ContentType")]

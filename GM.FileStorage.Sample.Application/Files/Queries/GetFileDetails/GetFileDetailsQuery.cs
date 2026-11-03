@@ -55,7 +55,8 @@ public class GetFileDetailsQueryHandler(IUnitOfWork unitOfWork)
 public class StoredFileDetailsDto : AuditableDto
 {
     public Guid Id { get; set; }
-    public string? Key { get; set; }
+    /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
+    public string? StorageKey { get; set; }
     public string? FileName { get; set; }
     public string? ContentType { get; set; }
     public long Size { get; set; }

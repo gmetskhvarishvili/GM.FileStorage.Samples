@@ -22,8 +22,8 @@ public class GetFilesListQuery : GetBaseListQuery, IRequest<PagedListDto<StoredF
     /// <summary>Only files uploaded for this user (the <c>userId</c> metadata row).</summary>
     public string? UserId { get; set; }
 
-    /// <summary>Only files whose storage key starts with this, e.g. <c>tenants/acme/</c>.</summary>
-    public string? KeyPrefix { get; set; }
+    /// <summary>Only files stored under this folder, e.g. <c>images/</c> for every image.</summary>
+    public string? Folder { get; set; }
 
     public string? ContentType { get; set; }
 }
@@ -39,13 +39,13 @@ public class GetFilesListQueryHandler(IUnitOfWork unitOfWork)
         var dateRange = request.ToAuditDateRange();
         var paging = request.ToPagingOptions();
 
-        var countSpec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.KeyPrefix,
+        var countSpec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.Folder,
             request.ContentType, dateRange, PagingOptions.None, OrderingOptions.None, request.Visibility);
         long? totalCount = paging.IncludeTotalCount
             ? await unitOfWork.StoredFileRepository.CountAsync(countSpec, cancellationToken)
             : null;
 
-        var spec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.KeyPrefix,
+        var spec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.Folder,
             request.ContentType, dateRange, paging, request.ToOrderingOptions(), request.Visibility);
         var entities = await unitOfWork.StoredFileRepository.ListAsync(spec, cancellationToken);
 
@@ -56,7 +56,8 @@ public class GetFilesListQueryHandler(IUnitOfWork unitOfWork)
 public class StoredFileDto : AuditableDto
 {
     public Guid Id { get; set; }
-    public string? Key { get; set; }
+    /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
+    public string? StorageKey { get; set; }
     public string? FileName { get; set; }
     public string? ContentType { get; set; }
     public long Size { get; set; }

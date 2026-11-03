@@ -7,12 +7,12 @@ namespace GM.FileStorage.Sample.API.Files;
 /// <summary>A file that was just stored.</summary>
 public class UploadedFileModel
 {
-    /// <summary>The catalog id.</summary>
+    /// <summary>The file's identifier (a GUID): use it for every other call.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "Id")]
     public Guid Id { get; set; }
-    /// <summary>The storage key.</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "Key")]
-    public string? Key { get; set; }
+    /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
+    [Display(ResourceType = typeof(StringResource), Name = "StorageKey")]
+    public string? StorageKey { get; set; }
     /// <summary>The original file name.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "FileName")]
     public string? FileName { get; set; }

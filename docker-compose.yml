@@ -2,9 +2,11 @@
 #
 #   docker compose up -d
 #
-# Then point the API at it (the committed appsettings.json carries no password):
+# Then give the API and the worker their connection string in appsecrets.json (gitignored), from the committed
+# templates:
 #
-#   ConnectionStrings__ApplicationDatabase="Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+#   cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
+#   cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
 #
 # The API applies its migrations on startup, so the schema is created on first run.
 services:

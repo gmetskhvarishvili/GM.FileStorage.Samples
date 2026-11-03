@@ -114,20 +114,20 @@ namespace GM.FileStorage.Sample.Common.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Key.
+        ///   Looks up a localized string similar to Storage Key.
         /// </summary>
-        public static string Key {
+        public static string StorageKey {
             get {
-                return ResourceManager.GetString("Key", resourceCulture);
+                return ResourceManager.GetString("StorageKey", resourceCulture);
             }
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Key Prefix.
+        ///   Looks up a localized string similar to Folder.
         /// </summary>
-        public static string KeyPrefix {
+        public static string Folder {
             get {
-                return ResourceManager.GetString("KeyPrefix", resourceCulture);
+                return ResourceManager.GetString("Folder", resourceCulture);
             }
         }
         
@@ -148,7 +148,25 @@ namespace GM.FileStorage.Sample.Common.Resources {
                 return ResourceManager.GetString("Size", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Looks up a localized string similar to Succeeded.
+        /// </summary>
+        public static string Succeeded {
+            get {
+                return ResourceManager.GetString("Succeeded", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Error.
+        /// </summary>
+        public static string Error {
+            get {
+                return ResourceManager.GetString("Error", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to Stored File.
         /// </summary>

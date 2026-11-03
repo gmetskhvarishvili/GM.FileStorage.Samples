@@ -3,35 +3,36 @@ using GM.Exceptions;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
 
 /// <summary>
-/// Deletes a file's bytes from storage and soft-removes its catalog row, which stays behind as an audit trail.
-/// Uploading to the same key again restores the row.
+/// Deletes a file from the catalog only: its row is soft-removed (hidden from list, details, download and presign)
+/// and its bytes stay in storage, so <c>RestoreFileCommand</c> can bring it back exactly as it was.
 /// </summary>
 public class DeleteFileCommand : IRequest
 {
-    public string? Key { get; set; }
+    public Guid Id { get; set; }
 }
 
 public class DeleteFileCommandValidator : AbstractValidator<DeleteFileCommand>
 {
     public DeleteFileCommandValidator()
     {
-        RuleFor(x => x.Key).NotNull().NotEmpty();
+        RuleFor(x => x.Id).NotEmpty();
     }
 }
 
-public class DeleteFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage)
+public class DeleteFileCommandHandler(IUnitOfWork unitOfWork)
     : IRequestHandler<DeleteFileCommand>
 {
     public async Task Handle(DeleteFileCommand request, CancellationToken cancellationToken)
     {
         var entity = await unitOfWork.StoredFileRepository
-            .FirstOrDefaultAsync(x => x.Key == request.Key
+            .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && x.IsActive
                                       && !x.IsDeleted
                                       && !x.IsHidden,
@@ -43,17 +44,14 @@ public class DeleteFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
+        // Only the row changes; the bytes are kept for a restore.
         entity.SoftRemove();
 
         unitOfWork.StoredFileRepository.Update(entity);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Bytes go after the row: if this fails the catalog already says "deleted" and only an orphaned object is
-        // left behind, never a row pointing at missing content.
-        await storage.DeleteAsync(entity.Key, cancellationToken);
     }
 }

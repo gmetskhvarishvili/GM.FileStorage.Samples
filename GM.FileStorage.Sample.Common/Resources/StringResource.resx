@@ -135,11 +135,11 @@
   <data name="IsPublic" xml:space="preserve">
     <value>Is Public</value>
   </data>
-  <data name="Key" xml:space="preserve">
-    <value>Key</value>
+  <data name="StorageKey" xml:space="preserve">
+    <value>Storage Key</value>
   </data>
-  <data name="KeyPrefix" xml:space="preserve">
-    <value>Key Prefix</value>
+  <data name="Folder" xml:space="preserve">
+    <value>Folder</value>
   </data>
   <data name="Metadata" xml:space="preserve">
     <value>Metadata</value>
@@ -149,6 +149,12 @@
   </data>
   <data name="StoredFile" xml:space="preserve">
     <value>Stored File</value>
+  </data>
+  <data name="Succeeded" xml:space="preserve">
+    <value>Succeeded</value>
+  </data>
+  <data name="Error" xml:space="preserve">
+    <value>Error</value>
   </data>
   <data name="TenantId" xml:space="preserve">
     <value>Tenant Id</value>
