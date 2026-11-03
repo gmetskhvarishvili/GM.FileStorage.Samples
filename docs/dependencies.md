@@ -102,7 +102,7 @@ flowchart LR
         common[Common]
     end
 
-    subgraph gmfs[GM.FileStorage 1.3.0]
+    subgraph gmfs[GM.FileStorage 2.0.0]
         fs[GM.FileStorage]
         fsDomain[GM.FileStorage.Domain]
         fsPers[GM.FileStorage.Persistence]
