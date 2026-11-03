@@ -211,7 +211,6 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnName("size");
 
                     b.Property<string>("StorageKey")
-                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)")

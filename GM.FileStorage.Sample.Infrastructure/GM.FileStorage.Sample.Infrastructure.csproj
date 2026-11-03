@@ -13,12 +13,12 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="GM.FileStorage" Version="1.3.0" />
+        <PackageReference Include="GM.FileStorage" Version="2.0.0" />
         <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
-        <PackageReference Include="GM.FileStorage.Local" Version="1.3.0" />
-        <PackageReference Include="GM.FileStorage.S3" Version="1.3.0" />
-        <PackageReference Include="GM.FileStorage.AzureBlob" Version="1.3.0" />
-        <PackageReference Include="GM.FileStorage.Encryption" Version="1.3.0" />
+        <PackageReference Include="GM.FileStorage.Local" Version="2.0.0" />
+        <PackageReference Include="GM.FileStorage.S3" Version="2.0.0" />
+        <PackageReference Include="GM.FileStorage.AzureBlob" Version="2.0.0" />
+        <PackageReference Include="GM.FileStorage.Encryption" Version="2.0.0" />
         <PackageReference Include="GM.HealthChecks.EntityFramework" Version="1.0.2" />
         <!-- The storage-cleanup job: GM.Scheduling, single-run per minute via an (in-memory) GM.DistributedLock. -->
         <PackageReference Include="GM.Scheduling" Version="1.0.0" />

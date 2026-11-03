@@ -50,8 +50,9 @@ flowchart LR
 | [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
 | [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
-> The catalog packages (`GM.FileStorage.Domain` / `GM.FileStorage.Persistence`) ship in GM.FileStorage
-> **1.2.0**; every `GM.FileStorage*` reference here is pinned to that version (they release in lockstep).
+> Every `GM.FileStorage*` reference here is pinned to **2.0.0** (the packages release in lockstep). 2.0.0 adds
+> encryption at rest, key templates and upload rules, and removes `GMStoredFile.Replace`: a file's content
+> never changes after upload.
 
 ## Layers
 

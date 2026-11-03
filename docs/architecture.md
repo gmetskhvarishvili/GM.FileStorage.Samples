@@ -99,7 +99,7 @@ erDiagram
     stored_files {
         uuid id PK "the file's id; every route uses it"
         string key "same as id"
-        string storage_key UK "where the bytes are, e.g. documents/9f/9f1c….pdf (concurrency token)"
+        string storage_key UK "where the bytes are, e.g. documents/9f/9f1c….pdf"
         string file_name
         string content_type
         bigint size
