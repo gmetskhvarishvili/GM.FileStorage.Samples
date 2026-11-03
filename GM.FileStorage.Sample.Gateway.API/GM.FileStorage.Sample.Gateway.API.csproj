@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- YARP reverse proxy + GM edge rate limiting, driven from configuration. -->
+        <PackageReference Include="GM.Gateway" Version="1.1.0" />
+        <!-- In-memory counter store + lock for the rate limits (one gateway instance; use the Redis variants for several). -->
+        <PackageReference Include="GM.Caching" Version="1.0.1" />
+        <PackageReference Include="GM.DistributedLock" Version="1.0.2" />
+        <!-- Liveness/readiness endpoints for the edge, including a probe of the files API. -->
+        <PackageReference Include="GM.HealthChecks" Version="1.0.2" />
+        <!-- Swagger UI at the root, rendering the files API's OpenAPI document proxied through the gateway. -->
+        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+    </ItemGroup>
+
+</Project>

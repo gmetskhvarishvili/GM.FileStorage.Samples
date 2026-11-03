@@ -1,0 +1,131 @@
+# Architecture
+
+The sample runs as three processes that share one PostgreSQL catalog and one storage backend:
+
+| Process | Project | Ports (dev) | Job |
+| --- | --- | --- | --- |
+| **Gateway** | `GM.FileStorage.Sample.Gateway.API` | `https://localhost:7141`, `http://localhost:5141` | The public edge: YARP reverse proxy (GM.Gateway), per-IP rate limits (GM.RateLimiting), Swagger UI |
+| **Files API** | `GM.FileStorage.Sample.API` | `https://localhost:7140`, `http://localhost:5140` | Serves every file request, applies migrations at startup |
+| **Worker** | `GM.FileStorage.Sample.Worker` | none | Runs `StorageCleanupJob` every minute |
+
+## The big picture
+
+```mermaid
+flowchart LR
+    client([Client / Swagger UI])
+
+    subgraph edge[Gateway.API]
+        rl[Rate limiting<br/>uploads 30/min · api 300/min per IP]
+        proxy[YARP reverse proxy]
+        rl --> proxy
+    end
+
+    subgraph api[Files API]
+        ctrl[FilesController] --> med[GM.Mediator<br/>commands & queries]
+        med --> uow[Unit of work<br/>repositories]
+        med --> fs[IFileStorageService<br/>+ encryption]
+    end
+
+    subgraph worker[Worker]
+        job[StorageCleanupJob<br/>cron: every minute]
+    end
+
+    db[(PostgreSQL<br/>file_storage.*)]
+    store[(Storage<br/>Local · S3 · Azure Blob)]
+
+    client -->|HTTPS| rl
+    proxy -->|/api/v1/files/**<br/>/swagger/**| ctrl
+    uow --> db
+    fs --> store
+    job --> db
+    job -->|delete unreferenced bytes| store
+```
+
+- **Clients only talk to the gateway.** It forwards `/api/{version}/files/**` and `/swagger/**` to the API.
+  Bodies are streamed through, never buffered, so large uploads and `Range` downloads pass unchanged.
+- **The API holds no background work.** It serves requests and applies migrations at startup.
+- **The worker holds no HTTP surface.** It reads the `storage_cleanups` queue and deletes the bytes that
+  nothing points at any more.
+- **The API and worker must see the same storage.** Both read `FileStorage:*`. Locally that's the shared
+  `App_Data/file-storage` folder at the repository root; in the cloud it's the same bucket or container.
+
+## Layers
+
+```mermaid
+flowchart TB
+    gateway[Gateway.API]
+    apiHost[API]
+    workerHost[Worker]
+    app[Application<br/>commands · queries · validators · mapping]
+    infra[Infrastructure<br/>file storage · encryption · StorageCleanupJob · health]
+    pers[Persistence<br/>DbContext · configurations · repositories · migrations]
+    domain[Domain<br/>StoredFile · StoredFileMetadata · StorageCleanup]
+    common[Common<br/>string resources]
+
+    gateway -. HTTP .-> apiHost
+    apiHost --> app
+    apiHost --> infra
+    apiHost --> pers
+    workerHost --> infra
+    workerHost --> pers
+    infra --> app
+    app --> domain
+    pers --> domain
+    app --> common
+```
+
+The gateway references no sample project; it only knows the API's address. The worker uses the same
+Persistence and Infrastructure as the API, but registers only what it needs (`AddWorkerInfrastructure`):
+file storage, a distributed lock and GM.Scheduling. It has no encryption, because deleting an object needs no
+keys.
+
+## Data model
+
+```mermaid
+erDiagram
+    stored_files ||--o{ stored_file_metadata : has
+    stored_files {
+        uuid id PK "the file's id; every route uses it"
+        string key "same as id"
+        string storage_key UK "where the bytes are, e.g. documents/9f/9f1c….pdf (concurrency token)"
+        string file_name
+        string content_type
+        bigint size
+        string checksum
+        bool is_public
+        bool is_deleted "soft delete; bytes kept"
+    }
+    stored_file_metadata {
+        uuid id PK
+        uuid stored_file_id FK
+        string name "tenantId, userId"
+        string value
+        bool is_deleted
+    }
+    storage_cleanups {
+        uuid id PK
+        string storage_key "bytes to delete"
+        timestamptz due_at_utc "claim token"
+        int attempts "backoff 1, 2, 4 … 60 min"
+    }
+```
+
+All tables live in the `file_storage` schema. Domain events go to `domain_events.domain_events` in the same
+transaction as the change that raised them.
+
+`storage_cleanups` is not linked to `stored_files` by a foreign key. An entry names a storage key, and the
+job checks at run time whether any file row still uses it: if one does, the entry is dropped without deleting
+anything.
+
+## Scaling out
+
+| Piece | One instance (the sample) | Several instances |
+| --- | --- | --- |
+| Gateway rate-limit counters | In-memory GM.Caching | `AddGMRedisCaching` + `AddGMRedisRateLimitStore`, so the limits are shared |
+| Gateway destinations | One API address | Add destinations to the `files-api` cluster; YARP balances them |
+| API | Stateless | Run as many as needed |
+| Worker | In-memory GM.DistributedLock | `GM.DistributedLock.Redis`, so one worker runs the job at a time. Claiming entries by their `due_at_utc` token keeps it safe even without a shared lock |
+| Storage | Local folder shared by API and worker | S3 or Azure Blob; a local folder only works when every process sees the same disk |
+
+See [request flows](request-flows.md) for what happens on each call and [configuration](configuration.md)
+for the settings.

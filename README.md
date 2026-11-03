@@ -22,8 +22,23 @@ It assembles **[GM.FileStorage](https://www.nuget.org/packages/GM.FileStorage)**
 catalog), **[GM.API](https://www.nuget.org/packages/GM.API)** (Web API startup, versioning, Swagger, errors,
 request logging, health, secrets), **[GM.Mediator](https://www.nuget.org/packages/GM.Mediator)** (CQRS
 dispatch) and **[GM.EntityFramework](https://www.nuget.org/packages/GM.EntityFramework)** (repository / unit of
-work / domain-event store / actor auditing). The layout mirrors
-[GM.Identity.Samples](https://github.com/gmetskhvarishvili/GM.Identity.Samples).
+work / domain-event store / actor auditing). Clients reach it through a
+**[GM.Gateway](https://www.nuget.org/packages/GM.Gateway)** edge with per-IP rate limits, and a separate
+worker runs the storage-cleanup job on **[GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling)**.
+The layout mirrors [GM.Identity.Samples](https://github.com/gmetskhvarishvili/GM.Identity.Samples).
+
+```mermaid
+flowchart LR
+    client([Client]) --> gw[Gateway.API<br/>:7141 · rate limits]
+    gw --> api[Files API<br/>:7140]
+    api --> db[(PostgreSQL)]
+    api --> store[(Storage)]
+    worker[Worker<br/>cleanup every minute] --> db
+    worker --> store
+```
+
+**Docs:** [architecture](docs/architecture.md) · [request flows](docs/request-flows.md) ·
+[configuration](docs/configuration.md)
 
 > The catalog packages (`GM.FileStorage.Domain` / `GM.FileStorage.Persistence`) ship in GM.FileStorage
 > **1.2.0**; every `GM.FileStorage*` reference here is pinned to that version (they release in lockstep).
@@ -35,9 +50,11 @@ work / domain-event store / actor auditing). The layout mirrors
 | `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, storage folder, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
-| `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure`: GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the storage-cleanup job, the database readiness check |
+| `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
 | `GM.FileStorage.Sample.API` | GM.API host; `Files/FilesController` sends mediator requests and maps its `*Model`s with Mapster |
+| `GM.FileStorage.Sample.Gateway.API` | The public edge: GM.Gateway (YARP) forwarding to the API, GM.RateLimiting per IP (uploads 30/min, everything else 300/min), Swagger UI at `/`, readiness that checks the API |
+| `GM.FileStorage.Sample.Worker` | Generic host that runs `StorageCleanupJob` every minute; no HTTP surface |
 | `tests/GM.FileStorage.Sample.Tests` | End-to-end tests over HTTP (`GmWebApplicationFactory<Program>`) and aggregate guards |
 
 ## What it demonstrates
@@ -122,7 +139,8 @@ always queued for deletion in the `storage_cleanups` table.
 - **Racing replacements of one file.** `StorageKey` is a concurrency token, so one upload wins and
   the others get a 400 asking them to retry. Their bytes are cleaned up.
 - **Delete** only marks the row deleted and keeps its bytes, so nothing is queued and a restore is instant.
-- **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute):
+- **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute, in the
+  worker):
   - It carries out due entries, backing off on failures (1, 2, 4 … minutes, at most an hour).
   - An entry whose bytes any file row still uses (live, or deleted and restorable) is dropped, not deleted.
   - Entries are claimed with a concurrency token, so the job and an upload slower than the 15-minute
@@ -171,6 +189,9 @@ because a direct link would serve ciphertext.
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
+Through the gateway, the same routes are on `https://localhost:7141`. Uploads and replacements are limited to
+30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
+
 ## Database setup
 
 The catalog lives in PostgreSQL, database `GMFileStorageSample`. Start one with Docker:
@@ -179,19 +200,23 @@ The catalog lives in PostgreSQL, database `GMFileStorageSample`. Start one with 
 docker compose up -d   # postgres:16 on localhost:5432, user postgres / password 123456
 ```
 
-The connection string lives in **`GM.FileStorage.Sample.API/appsecrets.json`**, not in `appsettings.json`.
-That file is gitignored. Create it from the committed template, which holds the docker-compose database's
+The connection string lives in **`appsecrets.json`** of the API and of the worker, not in `appsettings.json`.
+Those files are gitignored. Create them from the committed templates, which hold the docker-compose database's
 demo credentials:
 
 ```bash
 cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
 ```
 
+```bash
+cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
+```
+
 ```json
 { "ConnectionStrings": { "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" } }
 ```
 
-These all read it from the API project folder:
+The worker reads its own copy. These read the API's:
 - GM.API, which layers it over `appsettings.json` through GM.Secrets;
 - the tests;
 - the design-time factory that `dotnet ef` uses.
@@ -207,20 +232,37 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 
 ## Running
 
+Start the three processes, each in its own terminal (the API first: it applies the migrations):
+
 ```bash
-dotnet run --project GM.FileStorage.Sample.API
-
-curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
-
-curl "http://localhost:5140/api/v1/files?tenantId=acme"
-curl -o passport.pdf "http://localhost:5140/api/v1/files/6f1e…/content"
-curl -X PUT -F "file=@passport-v2.pdf" "http://localhost:5140/api/v1/files/6f1e…/content"
-curl -X DELETE "http://localhost:5140/api/v1/files/6f1e…"
-curl -X POST "http://localhost:5140/api/v1/files/6f1e…/restore"
+dotnet run --project GM.FileStorage.Sample.API          # https://localhost:7140
 ```
 
-Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO
+```bash
+dotnet run --project GM.FileStorage.Sample.Worker       # storage cleanup, every minute
+```
+
+```bash
+dotnet run --project GM.FileStorage.Sample.Gateway.API  # https://localhost:7141, Swagger UI at /
+```
+
+Then call the gateway:
+
+```bash
+curl -F "file=@passport.pdf" "https://localhost:7141/api/v1/files?tenantId=acme&userId=u1"
+# { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+
+curl "https://localhost:7141/api/v1/files?tenantId=acme"
+curl -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
+curl -X PUT -F "file=@passport-v2.pdf" "https://localhost:7141/api/v1/files/6f1e…/content"
+curl -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
+curl -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
+```
+
+The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
+
+Files land under `FileStorage:Local:RootPath`, which is `../App_Data/file-storage`: the repository root's
+`App_Data` folder (gitignored), shared by the API and worker. To run on S3/MinIO
 or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
 - **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
 - **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
