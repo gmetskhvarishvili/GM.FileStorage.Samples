@@ -3,9 +3,15 @@
 Four views, from the outside in: what each process talks to at run time, how the projects reference each other,
 which packages each project pulls in, and how the classes inside a request depend on each other.
 
-## Runtime: processes and what they call
+**Diagrams in this doc:** [Runtime dependencies](#runtime-dependencies--flowchart) · [Project references](#project-references--dependency-graph) · [Package dependencies](#package-dependencies--dependency-graph) · [GM.FileStorage packages](#gmfilestorage-packages--dependency-graph) · [Request classes](#request-classes--class-diagram) · [Domain model](#domain-model--class-diagram)  
+All diagrams: [index](README.md)
+
+## Runtime dependencies — flowchart
 
 ```mermaid
+---
+title: Runtime dependencies — flowchart
+---
 flowchart LR
     client([Client / browser])
 
@@ -36,9 +42,12 @@ flowchart LR
 | Files API | PostgreSQL (applies migrations), secrets | PostgreSQL, storage |
 | Worker | Secrets | PostgreSQL, storage |
 
-## Project references
+## Project references — dependency graph
 
 ```mermaid
+---
+title: Project references — dependency graph
+---
 flowchart TB
     subgraph hosts[Hosts]
         gw[Gateway.API]
@@ -75,9 +84,12 @@ flowchart TB
 - **The worker is the API without HTTP:** it shares Persistence and Infrastructure and registers its own subset
   (`AddWorkerInfrastructure`).
 
-## Packages per project
+## Package dependencies — dependency graph
 
 ```mermaid
+---
+title: Package dependencies — dependency graph
+---
 flowchart LR
     subgraph sample[Sample projects]
         gw[Gateway.API]
@@ -133,9 +145,12 @@ Third-party packages, by project:
 | Persistence | Npgsql.EntityFrameworkCore.PostgreSQL, EFCore.NamingConventions (snake_case), EF Core Design/Tools |
 | Tests | xunit, GM.Testing, GM.Testing.AspNetCore |
 
-### Inside GM.FileStorage
+## GM.FileStorage packages — dependency graph
 
 ```mermaid
+---
+title: GM.FileStorage packages — dependency graph
+---
 flowchart BT
     fs[GM.FileStorage<br/>IFileStorageService, key templates, upload rules, ranges]
     local[GM.FileStorage.Local] --> fs
@@ -154,9 +169,12 @@ The storage half (`GM.FileStorage` and its providers) and the catalog half (`Dom
 reference each other. The sample is what joins them: a handler writes bytes through `IFileStorageService` and
 records them through the unit of work.
 
-## Classes behind a request
+## Request classes — class diagram
 
 ```mermaid
+---
+title: Request classes — class diagram
+---
 classDiagram
     direction LR
 
@@ -224,9 +242,12 @@ classDiagram
 
 Delete, list and details touch only the catalog. Restore asks storage too, to check the bytes are still there.
 
-### Domain model
+## Domain model — class diagram
 
 ```mermaid
+---
+title: Domain model — class diagram
+---
 classDiagram
     direction TB
 

@@ -17,14 +17,15 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Contents:** [startup](#startup) · [through the gateway](#through-the-gateway) · [upload](#upload) ·
-[replace](#replace) · [list](#list) · [details](#details) · [download](#download) · [delete](#delete) ·
-[restore](#restore) · [presign](#presign) · [encryption](#encryption-at-rest) · [cleanup](#cleanup) ·
-[health](#health) · [swagger](#swagger-through-the-gateway)
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Replace content](#replace-content--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+All diagrams: [index](README.md)
 
-## Startup
+## Startup — sequence
 
 ```mermaid
+---
+title: Startup — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -52,11 +53,14 @@ sequenceDiagram
 The worker never migrates. If it starts before the API has created the schema, its first runs fail and are
 retried the next minute.
 
-## Through the gateway
+## Gateway forwarding — sequence
 
 Every call below passes this way first; the later diagrams start at the API.
 
 ```mermaid
+---
+title: Gateway forwarding — sequence
+---
 sequenceDiagram
     autonumber
     actor C as Client
@@ -82,11 +86,14 @@ sequenceDiagram
     end
 ```
 
-## Upload
+## Upload — sequence
 
 `POST /api/v1/files`
 
 ```mermaid
+---
+title: Upload — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -123,11 +130,14 @@ sequenceDiagram
 If the API crashes between the upload and the commit, the bytes exist but nothing points at them. The queued
 entry falls due 15 minutes later and the worker deletes them.
 
-## Replace
+## Replace content — sequence
 
 `PUT /api/v1/files/{id}/content`
 
 ```mermaid
+---
+title: Replace content — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -166,11 +176,14 @@ sequenceDiagram
 
 A replacement never overwrites bytes the catalog still points at, and replacing a deleted file restores it.
 
-## List
+## List — sequence
 
 `GET /api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=`
 
 ```mermaid
+---
+title: List — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -189,11 +202,14 @@ sequenceDiagram
 Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
 The folder filter is a prefix match on the storage key.
 
-## Details
+## Details — sequence
 
 `GET /api/v1/files/{id}?visibility=`
 
 ```mermaid
+---
+title: Details — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -207,11 +223,14 @@ sequenceDiagram
     end
 ```
 
-## Download
+## Download — sequence
 
 `GET /api/v1/files/{id}/content`
 
 ```mermaid
+---
+title: Download — sequence
+---
 sequenceDiagram
     autonumber
     actor C as Client
@@ -241,11 +260,14 @@ sequenceDiagram
     end
 ```
 
-## Delete
+## Delete — sequence
 
 `DELETE /api/v1/files/{id}`
 
 ```mermaid
+---
+title: Delete — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -263,11 +285,14 @@ sequenceDiagram
     Note over S: untouched: nothing queued, restore is instant
 ```
 
-## Restore
+## Restore — sequence
 
 `POST /api/v1/files/{id}/restore`
 
 ```mermaid
+---
+title: Restore — sequence
+---
 sequenceDiagram
     autonumber
     participant API
@@ -288,11 +313,14 @@ sequenceDiagram
     end
 ```
 
-## Presign
+## Presign — sequence
 
 `GET /api/v1/files/{id}/presign`
 
 ```mermaid
+---
+title: Presign — sequence
+---
 sequenceDiagram
     autonumber
     actor C as Client
@@ -316,12 +344,15 @@ sequenceDiagram
     end
 ```
 
-## Encryption at rest
+## Encryption at rest — sequence
 
 With `FileStorage:Encryption:Enabled`, `EncryptingFileStorageService` wraps the provider. Upload and download
 look the same to the handlers.
 
 ```mermaid
+---
+title: Encryption at rest — sequence
+---
 sequenceDiagram
     autonumber
     participant H as Handler
@@ -350,11 +381,14 @@ sequenceDiagram
 Any altered, reordered or truncated chunk fails authentication and the download errors instead of returning
 wrong bytes.
 
-## Cleanup
+## Storage cleanup — sequence
 
 The worker, every minute.
 
 ```mermaid
+---
+title: Storage cleanup — sequence
+---
 sequenceDiagram
     autonumber
     participant Q as Scheduler (cron)
@@ -396,9 +430,12 @@ sequenceDiagram
 Claiming by the `due_at_utc` concurrency token means the job and an upload slower than its 15-minute grace
 period can't both act on one entry: whichever saves second fails and leaves it alone.
 
-## Health
+## Health checks — sequence
 
 ```mermaid
+---
+title: Health checks — sequence
+---
 sequenceDiagram
     autonumber
     actor O as Orchestrator / load balancer
@@ -429,9 +466,12 @@ sequenceDiagram
 
 The gateway's health routes are its own, not forwarded. The API's are reached directly, not through the gateway.
 
-## Swagger through the gateway
+## Swagger via gateway — sequence
 
 ```mermaid
+---
+title: Swagger via gateway — sequence
+---
 sequenceDiagram
     autonumber
     actor B as Browser

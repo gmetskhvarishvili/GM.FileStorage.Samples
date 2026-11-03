@@ -8,9 +8,15 @@ The sample runs as three processes that share one PostgreSQL catalog and one sto
 | **Files API** | `GM.FileStorage.Sample.API` | `https://localhost:7140`, `http://localhost:5140` | Serves every file request, applies migrations at startup |
 | **Worker** | `GM.FileStorage.Sample.Worker` | none | Runs `StorageCleanupJob` every minute |
 
-## The big picture
+**Diagrams in this doc:** [System architecture](#system-architecture--flowchart) · [Layers](#layers--dependency-graph) · [Data model](#data-model--er-diagram)  
+All diagrams: [index](README.md)
+
+## System architecture — flowchart
 
 ```mermaid
+---
+title: System architecture — flowchart
+---
 flowchart LR
     client([Client / Swagger UI])
 
@@ -49,9 +55,12 @@ flowchart LR
 - **The API and worker must see the same storage.** Both read `FileStorage:*`. Locally that's the shared
   `App_Data/file-storage` folder at the repository root; in the cloud it's the same bucket or container.
 
-## Layers
+## Layers — dependency graph
 
 ```mermaid
+---
+title: Layers — dependency graph
+---
 flowchart TB
     gateway[Gateway.API]
     apiHost[API]
@@ -79,9 +88,12 @@ Persistence and Infrastructure as the API, but registers only what it needs (`Ad
 file storage, a distributed lock and GM.Scheduling. It has no encryption, because deleting an object needs no
 keys.
 
-## Data model
+## Data model — ER diagram
 
 ```mermaid
+---
+title: Data model — ER diagram
+---
 erDiagram
     stored_files ||--o{ stored_file_metadata : has
     stored_files {

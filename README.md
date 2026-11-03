@@ -28,6 +28,9 @@ worker runs the storage-cleanup job on **[GM.Scheduling](https://www.nuget.org/p
 The layout mirrors [GM.Identity.Samples](https://github.com/gmetskhvarishvili/GM.Identity.Samples).
 
 ```mermaid
+---
+title: System overview — flowchart
+---
 flowchart LR
     client([Client]) --> gw[Gateway.API<br/>:7141 · rate limits]
     gw --> api[Files API<br/>:7140]
@@ -37,7 +40,7 @@ flowchart LR
     worker --> store
 ```
 
-**Docs**
+**Docs** ([all diagrams, by action and by doc](docs/README.md))
 
 | Doc | Diagrams |
 | --- | --- |

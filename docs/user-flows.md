@@ -3,9 +3,15 @@
 What a caller can do with a file, and every outcome they can get back. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-## The file's lifecycle
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Replace content](#replace-content--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+All diagrams: [index](README.md)
+
+## File lifecycle — state diagram
 
 ```mermaid
+---
+title: File lifecycle — state diagram
+---
 stateDiagram-v2
     direction LR
     [*] --> Live: upload (POST /files)
@@ -29,9 +35,12 @@ stateDiagram-v2
 A file is never removed from the catalog through the API, and its current bytes are never deleted. Only the
 bytes of previous versions and of uploads that were never recorded are deleted, by the worker.
 
-## Every request: the gateway first
+## Gateway checks — user flow
 
 ```mermaid
+---
+title: Gateway checks — user flow
+---
 flowchart TD
     req([Request to :7141]) --> route{Matches a route?}
     route -- no --> nf404[404 Not Found]
@@ -50,9 +59,12 @@ flowchart TD
 
 Bodies over 60 MB are refused (`413`) by the gateway and by the API.
 
-## Upload a file
+## Upload — user flow
 
 ```mermaid
+---
+title: Upload — user flow
+---
 flowchart TD
     start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
@@ -67,9 +79,12 @@ flowchart TD
 
 Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
 
-## Find files
+## List — user flow
 
 ```mermaid
+---
+title: List — user flow
+---
 flowchart TD
     start([GET /api/v1/files]) --> filters[Optional filters:<br/>tenantId · userId · folder · contentType<br/>dates · visibility]
     filters --> paging[Optional paging:<br/>currentPage · pageSize · ordering]
@@ -81,9 +96,12 @@ flowchart TD
 
 Deleted files are left out unless `visibility` includes them. An empty page is still `200`.
 
-## View a file's details
+## Details — user flow
 
 ```mermaid
+---
+title: Details — user flow
+---
 flowchart TD
     start([GET /api/v1/files/id]) --> guid{id is a GUID?}
     guid -- no --> n404[404 no such route]
@@ -92,9 +110,12 @@ flowchart TD
     exists -- yes --> ok[200 details:<br/>storageKey, size, checksum,<br/>metadata, audit dates]
 ```
 
-## Download a file
+## Download — user flow
 
 ```mermaid
+---
+title: Download — user flow
+---
 flowchart TD
     start([GET /api/v1/files/id/content]) --> live{Live file?}
     live -- no, unknown or deleted --> f404[404]
@@ -110,9 +131,12 @@ flowchart TD
 Ranges let video players seek and interrupted downloads resume. With encryption at rest on, the same responses
 come back decrypted.
 
-## Replace a file's content
+## Replace content — user flow
 
 ```mermaid
+---
+title: Replace content — user flow
+---
 flowchart TD
     start([PUT /api/v1/files/id/content<br/>multipart file, tenantId?, userId?]) --> exists{File exists?<br/>deleted counts}
     exists -- no --> f404[404]
@@ -129,9 +153,12 @@ flowchart TD
 Tenant and user stay as they were unless the request gives new ones. The previous version's bytes are deleted
 straight away, or by the worker if that fails.
 
-## Delete a file
+## Delete — user flow
 
 ```mermaid
+---
+title: Delete — user flow
+---
 flowchart TD
     start([DELETE /api/v1/files/id]) --> live{Live file?}
     live -- no, unknown or already deleted --> f404[404]
@@ -139,9 +166,12 @@ flowchart TD
     ok --> after([Hidden from list, download and presign<br/>bytes kept, restorable any time])
 ```
 
-## Restore a file
+## Restore — user flow
 
 ```mermaid
+---
+title: Restore — user flow
+---
 flowchart TD
     start([POST /api/v1/files/id/restore]) --> deleted{A deleted file?}
     deleted -- no, unknown or live --> f404[404]
@@ -151,9 +181,12 @@ flowchart TD
     ok --> after([Back as it was:<br/>same content, same metadata])
 ```
 
-## Share a link
+## Presign — user flow
 
 ```mermaid
+---
+title: Presign — user flow
+---
 flowchart TD
     start([GET /api/v1/files/id/presign]) --> live{Live file?}
     live -- no --> f404[404]
@@ -166,11 +199,11 @@ flowchart TD
 A link points at the current version's bytes. A replacement deletes those bytes straight away, so links handed
 out before it stop working; ask for a new one.
 
-## A typical session
+## Typical session — user journey
 
 ```mermaid
 journey
-    title Working with one document
+    title Typical session — user journey
     section Store
       Upload passport.pdf: 5: Caller
       Find it by tenant: 4: Caller

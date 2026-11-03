@@ -5,6 +5,7 @@
     <File Path="LICENSE" />
   </Folder>
   <Folder Name="/Solution Items/Docs/">
+    <File Path="docs/README.md" />
     <File Path="docs/architecture.md" />
     <File Path="docs/dependencies.md" />
     <File Path="docs/user-flows.md" />

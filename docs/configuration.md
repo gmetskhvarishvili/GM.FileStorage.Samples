@@ -4,7 +4,15 @@ Each process reads `appsettings.json`, then layers secrets over it with GM.Secre
 (gitignored), the store named by `SECRETS_PROVIDER`, and environment variables. Settings that aren't secret live
 in `appsettings.json`; connection strings, cloud credentials and encryption keys live in `appsecrets.json`.
 
+**Diagrams in this doc:** [Configuration sources](#configuration-sources--flowchart)  
+All diagrams: [index](README.md)
+
+## Configuration sources — flowchart
+
 ```mermaid
+---
+title: Configuration sources — flowchart
+---
 flowchart LR
     subgraph committed[Committed]
         a1[appsettings.json]
