@@ -121,7 +121,7 @@ public class FilesController : BaseController
         [FromRoute] string key,
         CancellationToken cancellationToken)
     {
-        var query = new DownloadFileQuery { Key = key };
+        var query = new DownloadFileQuery { Key = DecodeKey(key) };
         var requested = Request.GetTypedHeaders().Range;
         // One range only; for several (rare), RFC 9110 lets us send the whole file instead.
         if (requested is { Unit.Value: "bytes", Ranges.Count: 1 } && requested.Ranges.Single() is var r)
@@ -175,7 +175,7 @@ public class FilesController : BaseController
         [FromRoute] string key,
         CancellationToken cancellationToken)
     {
-        await Mediator.Send(new DeleteFileCommand { Key = key }, cancellationToken);
+        await Mediator.Send(new DeleteFileCommand { Key = DecodeKey(key) }, cancellationToken);
         return NoContent();
     }
 
@@ -192,7 +192,7 @@ public class FilesController : BaseController
         [FromRoute] string key,
         CancellationToken cancellationToken)
     {
-        await Mediator.Send(new RestoreFileCommand { Key = key }, cancellationToken);
+        await Mediator.Send(new RestoreFileCommand { Key = DecodeKey(key) }, cancellationToken);
         return NoContent();
     }
 
@@ -209,8 +209,14 @@ public class FilesController : BaseController
         [FromRoute] string key,
         CancellationToken cancellationToken)
     {
-        var response = await Mediator.Send(new GetFilePresignedUrlQuery { Key = key }, cancellationToken);
+        var response = await Mediator.Send(new GetFilePresignedUrlQuery { Key = DecodeKey(key) }, cancellationToken);
         var result = response.Adapt<PresignedUrlModel>();
         return Ok(result);
     }
+
+    // Keys contain slashes (tenants/acme/users/u1/…). A client may send them as-is or URL-encoded — Swagger UI
+    // encodes path parameters, giving tenants%2Facme%2F… — and ASP.NET Core leaves %2F encoded in a {**key} route
+    // value, so decode it here; both forms then find the same file. (Keys come from the key strategy and contain
+    // no literal '%'.)
+    private static string DecodeKey(string key) => Uri.UnescapeDataString(key);
 }

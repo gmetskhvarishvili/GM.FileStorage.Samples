@@ -270,6 +270,24 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Key_routes_accept_a_url_encoded_key_as_swagger_sends_it()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var original = Encoding.UTF8.GetBytes("%PDF-1.7 encoded key");
+        var uploaded = await UploadAsync(client, original, "e.pdf", $"tenantId={_tenantId}&userId=u1");
+        var encoded = Uri.EscapeDataString(uploaded.Key); // tenants%2F…%2Fusers%2Fu1%2F….pdf
+        Assert.Contains("%2F", encoded, StringComparison.Ordinal);
+
+        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{encoded}"));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v1/presign/{encoded}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{encoded}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/restore/{encoded}", null)).StatusCode);
+        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Key}"));
+    }
+
+    [Fact]
     public async Task Download_and_delete_of_an_unknown_key_return_404()
     {
         if (!_infraReady) return;
