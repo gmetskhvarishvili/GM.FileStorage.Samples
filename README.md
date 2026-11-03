@@ -138,22 +138,25 @@ The catalog lives in PostgreSQL, database `GMFileStorageSample`. Start one with 
 docker compose up -d   # postgres:16 on localhost:5432, user postgres / password 123456
 ```
 
-The committed `appsettings.json` has the connection string **without a password**
-(`Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres`). Supply the real one in either of
-two ways — never commit it:
+The connection string lives in **`GM.FileStorage.Sample.API/appsecrets.json`**, not in `appsettings.json`.
+That file is gitignored. Create it from the committed template, which holds the docker-compose database's
+demo credentials:
 
-- an environment variable:
+```bash
+cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
+```
 
-  ```bash
-  export ConnectionStrings__ApplicationDatabase="Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
-  ```
+```json
+{ "ConnectionStrings": { "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" } }
+```
 
-- or a gitignored `GM.FileStorage.Sample.API/appsecrets.json` (GM.API layers it into configuration; the
-  design-time factory used by `dotnet ef` reads it too):
+These all read it from the API project folder:
+- GM.API, which layers it over `appsettings.json` through GM.Secrets;
+- the tests;
+- the design-time factory that `dotnet ef` uses.
 
-  ```json
-  { "ConnectionStrings": { "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" } }
-  ```
+For a real database, put its connection string there (or in the secrets store named by `SECRETS_PROVIDER`),
+never in a committed file.
 
 The API applies pending migrations on startup, so the schema is created on first run. To add a migration:
 
@@ -184,7 +187,7 @@ out of `appsettings.json`: GM.API reads them from `appsecrets.json` or the secre
 ## Testing
 
 ```bash
-ConnectionStrings__ApplicationDatabase="Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" dotnet test
+dotnet test   # with Postgres running and appsecrets.json in place (see Database setup)
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)

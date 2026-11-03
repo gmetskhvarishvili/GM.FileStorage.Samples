@@ -24,8 +24,8 @@ public abstract class DesignTimeDbContextFactoryBase<TContext> :
 
     private TContext Create(string basePath, string? environmentName)
     {
-        // The same sources the API host reads, so `dotnet ef` finds the password wherever the app does: the
-        // committed appsettings.json carries none; the gitignored appsecrets.json or the environment supplies it.
+        // The same sources the API host reads, so `dotnet ef` finds the connection string where the app does: in
+        // the gitignored appsecrets.json (or the environment); the committed appsettings.json carries none.
         var configuration = new ConfigurationBuilder()
             .SetBasePath(basePath)
             .AddJsonFile("appsettings.json")
