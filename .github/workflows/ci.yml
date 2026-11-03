@@ -45,3 +45,45 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build --verbosity normal
+
+  # The whole sample as docker-compose.yml runs it — images built from the Dockerfile — exercised through the gateway.
+  compose:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start PostgreSQL, the API, the worker and the gateway
+        run: docker compose up -d --build
+
+      - name: Wait until the gateway is ready (its readiness probes the API)
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/health/ready >/dev/null && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Upload, list and download through the gateway
+        run: |
+          printf '%%PDF-1.7 compose smoke test' > smoke.pdf
+          id=$(curl -sf -F "file=@smoke.pdf;type=application/pdf" "http://localhost:8080/api/v1/files?tenantId=ci&userId=u1" | jq -r .id)
+          echo "uploaded $id"
+          curl -sf "http://localhost:8080/api/v1/files?tenantId=ci" | jq -e --arg id "$id" 'map(.id) == [$id]'
+          curl -sf -o back.pdf "http://localhost:8080/api/v1/files/$id/content"
+          cmp smoke.pdf back.pdf
+          curl -sf http://localhost:8080/swagger/v1/swagger.json | jq -e '.paths | has("/api/v1/files/batch")'
+
+      - name: The API and the worker share the storage volume
+        run: |
+          docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .
+          docker compose exec -T worker find /data/file-storage -name '*.pdf' | grep -q .
+          docker compose logs worker | grep -q "storage-cleanup"
+
+      - name: Logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/App_Data/
+**/appsecrets.json
+**/*.user
+.git/
+.github/
+.vs/
+.idea/
+docs/
+tests/

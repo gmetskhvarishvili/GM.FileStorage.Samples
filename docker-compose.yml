@@ -1,14 +1,26 @@
-# PostgreSQL for the GM.FileStorage sample's catalog (the stored-file + metadata tables).
+# The whole GM.FileStorage sample: PostgreSQL, the files API, the worker and the gateway.
 #
-#   docker compose up -d
+#   docker compose up -d --build        # everything; the gateway (Swagger UI at /) is on http://localhost:8080
+#   docker compose up -d postgres       # just the database, to run the projects with `dotnet run`
 #
-# Then give the API and the worker their connection string in appsecrets.json (gitignored), from the committed
-# templates:
+# Only the gateway is published, as in production: the API is reached through it. Inside the network the services
+# talk plain HTTP on port 8080. The API applies its migrations on startup; the worker retries its job every minute,
+# so it copes with starting before the schema exists.
+#
+# Settings that live in appsecrets.json for `dotnet run` (the connection string) come from environment variables here,
+# which GM.Secrets layers over appsettings.json the same way. The credentials are the demo ones below.
+#
+# For `dotnet run` instead, give the API and the worker their connection string in appsecrets.json (gitignored),
+# from the committed templates:
 #
 #   cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
 #   cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
-#
-# The API applies its migrations on startup, so the schema is created on first run.
+
+x-app-environment: &app-environment
+  ConnectionStrings__ApplicationDatabase: "Host=postgres;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+  # The storage root the API and the worker share (the file-storage volume).
+  FileStorage__Local__RootPath: /data/file-storage
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,5 +39,55 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      args:
+        PROJECT: GM.FileStorage.Sample.API
+    container_name: gm-filestorage-api
+    environment:
+      <<: *app-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      # The local provider's dev-only presign links, as seen through the gateway.
+      FileStorage__Local__PublicBaseUrl: http://localhost:8080/files
+    volumes:
+      - gm-filestorage-files:/data/file-storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      args:
+        PROJECT: GM.FileStorage.Sample.Worker
+    container_name: gm-filestorage-worker
+    environment:
+      <<: *app-environment
+      DOTNET_ENVIRONMENT: Development
+    volumes:
+      - gm-filestorage-files:/data/file-storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  gateway:
+    build:
+      context: .
+      args:
+        PROJECT: GM.FileStorage.Sample.Gateway.API
+    container_name: gm-filestorage-gateway
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ReverseProxy__Clusters__files-api__Destinations__primary__Address: http://api:8080/
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   gm-filestorage-pgdata:
+  gm-filestorage-files:

@@ -17,6 +17,8 @@
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
     <File Path="docker-compose.yml" />
+    <File Path="Dockerfile" />
+    <File Path=".dockerignore" />
   </Folder>
   <Folder Name="/Solution Items/CI/">
     <File Path=".github/workflows/ci.yml" />
@@ -32,6 +34,7 @@
     <Project Path="GM.FileStorage.Sample.Worker/GM.FileStorage.Sample.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/GM.FileStorage.Sample.Gateway.Tests/GM.FileStorage.Sample.Gateway.Tests.csproj" />
     <Project Path="tests/GM.FileStorage.Sample.Tests/GM.FileStorage.Sample.Tests.csproj" />
   </Folder>
 </Solution>
