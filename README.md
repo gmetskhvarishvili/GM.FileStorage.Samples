@@ -92,6 +92,30 @@ always queued for deletion in the `storage_cleanups` table.
   - Entries are claimed with a concurrency token, so the job and an upload slower than the 15-minute
     grace period can't both act on one.
 
+## Encryption at rest
+
+Off by default (`FileStorage:Encryption:Enabled: false` in appsettings.json). To turn it on, supply
+these as secrets, never in appsettings.json: in a gitignored `appsecrets.json`, through
+`SECRETS_PROVIDER`, or as environment variables.
+
+```jsonc
+// appsecrets.json (gitignored)
+{
+  "FileStorage": {
+    "Encryption": {
+      "Enabled": true,
+      "ActiveKeyId": "2026-11",
+      "Keys": { "2026-11": "<openssl rand -base64 32>" }
+    }
+  }
+}
+```
+
+With it on, every file is encrypted with its own AES-256-GCM key, wrapped by the master key
+(`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Over HTTP nothing changes:
+uploads, downloads and range requests work as before. The exception is presign, which returns a 400,
+because a direct link would serve ciphertext.
+
 ## Endpoints
 
 | Method | Route | Purpose |

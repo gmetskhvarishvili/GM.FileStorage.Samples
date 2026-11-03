@@ -1,4 +1,5 @@
 using GM.FileStorage.AzureBlob;
+using GM.FileStorage.Encryption;
 using GM.FileStorage.Local;
 using GM.FileStorage.S3;
 using GM.DistributedLock;
@@ -29,13 +30,18 @@ public static class DependencyInjection
         // KYC-style tenant/user-scoped keys (replaces the default date-partitioned strategy).
         services.AddSingleton<IFileKeyStrategy, TenantKeyStrategy>();
 
-        // Readiness: /health/ready fails while the catalog database is unreachable.
+        // Encryption at rest, off in appsettings.json (FileStorage:Encryption:Enabled). Turn it on together with the
+        // master keys, supplied as secrets (appsecrets.json, SECRETS_PROVIDER, environment): every file is then
+        // encrypted with its own AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
+        services.AddGMFileStorageEncryption(configuration);
+
         // StorageCleanupJob deletes whatever bytes uploads and deletes leave unreferenced (crashes, failed deletes,
         // replaced versions). The in-memory lock suits one instance; use GM.DistributedLock.Redis when scaling out
         // so the job still runs once per minute cluster-wide.
         services.AddGMDistributedLock();
         services.AddGMScheduling(builder => builder.ScanAssemblies(typeof(StorageCleanupJob).Assembly));
 
+        // Readiness: /health/ready fails while the catalog database is unreachable.
         services.AddHealthChecks()
             .AddGMDatabaseCheck<ApplicationDbContext>();
 

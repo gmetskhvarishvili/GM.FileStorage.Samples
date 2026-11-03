@@ -48,9 +48,19 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
         }
 
         // The link points at the current version's bytes (the file's storage key), not the logical key.
+        // Some setups can't hand out direct links: encrypted storage (a link would serve ciphertext) or the local
+        // provider without a PublicBaseUrl. That's a 400 with the reason; download through the API instead.
         var expiry = GetFilePresignedUrlQuery.DefaultExpiry;
-        var url = await storage.GetPresignedUrlAsync(
-            entity.StorageKey, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
+        Uri url;
+        try
+        {
+            url = await storage.GetPresignedUrlAsync(
+                entity.StorageKey, new PresignedUrlRequest { Expiry = expiry }, cancellationToken);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new BadRequestException(ex.Message);
+        }
 
         return new FilePresignedUrlDto { Url = url, ExpiresAtUtc = DateTime.UtcNow.Add(expiry) };
     }
