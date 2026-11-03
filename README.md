@@ -50,9 +50,10 @@ flowchart LR
 | [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
 | [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
-> Every `GM.FileStorage*` reference here is pinned to **2.0.0** (the packages release in lockstep). 2.0.0 adds
-> encryption at rest, key templates and upload rules, and removes `GMStoredFile.Replace`: a file's content
-> never changes after upload.
+> Every `GM.FileStorage*` reference here is pinned to **2.0.2** (the packages release in lockstep). 2.0.0 added
+> encryption at rest, key templates and upload rules, and removed `GMStoredFile.Replace`: a file's content
+> never changes after upload. 2.0.1 measures an upload's size instead of trusting the stream; 2.0.2 fixes S3
+> presigned links on plain-HTTP endpoints and checksum checks on ranged S3 downloads.
 
 ## Layers
 
