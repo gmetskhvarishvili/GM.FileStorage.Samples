@@ -250,6 +250,25 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Contains("bytes", whole.Headers.AcceptRanges);
     }
 
+    [Theory]
+    // .docx is a ZIP package; .doc is an OLE compound file. Only the leading bytes are checked.
+    [InlineData("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", new byte[] { (byte)'P', (byte)'K', 3, 4, 20, 0, 6, 0 })]
+    [InlineData("report.doc", "application/msword", new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 })]
+    public async Task Upload_accepts_word_documents(string fileName, string contentType, byte[] bytes)
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}&userId=u1",
+            bytes, fileName, contentType);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var uploaded = await response.Content.ReadFromJsonAsync<UploadResponse>();
+        Assert.Equal(contentType, uploaded!.ContentType);
+        Assert.StartsWith($"{_tenantId}/documents/", await StoragePathAsync(uploaded.Id));
+        Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
+    }
+
     [Fact]
     public async Task Upload_rejects_files_that_break_the_upload_rules()
     {

@@ -93,3 +93,27 @@ its deletes would miss the API's files and the queue would back off forever.
 ```
 
 See [Storage layout](../README.md#storage-layout) for the placeholders and other layouts.
+
+## Upload rules
+
+```jsonc
+"FileStorage": {
+  "MaxFileSize": 52428800,            // 50 MB
+  "AllowedContentTypes": [
+    "application/pdf",
+    "application/msword",                                                       // .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  // .docx
+    "image/*",
+    "video/*"
+  ],
+  "VerifyContentType": true           // the bytes must match the declared type
+}
+```
+
+Anything else gets a `400` that names the type. To allow more, add its media type (or a `type/*` pattern) to
+`AllowedContentTypes` in the API's appsettings.json; Excel, for example, is `application/vnd.ms-excel` and
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+
+Send a file with its own media type. A file sent as `application/octet-stream` is checked under the type its
+bytes reveal. For Office files that's only `application/zip` (`.docx`) or `application/x-ole-storage` (`.doc`),
+which aren't allowed.
