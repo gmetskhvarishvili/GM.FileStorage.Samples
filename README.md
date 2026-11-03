@@ -44,7 +44,7 @@ work / domain-event store / actor auditing). The layout mirrors
 
 - **One GUID per file; its storage location shown.** A file is identified by a GUID, its id, which is also
   its key; every route uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate` (see
-  below), and that location comes back as `storageKey` in every response.
+  below). Every response shows the location as `folder` plus `storageKey`, the stored object's name.
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
@@ -75,7 +75,8 @@ A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are 
 "KeyTemplate": "{category}/{shard}/{id}{ext}"   // → documents/9f/9f1cb2…a3.pdf, images/4e/4e07…png
 ```
 
-Every response shows it as `storageKey`, so you can see where each file lives. Every upload gets a
+Every response shows it split in two, `folder` (`documents/9f/`) and `storageKey` (`9f1cb2…a3.pdf`), so
+you can see where each file lives. Every upload gets a
 fresh storage key, so replacing a file never overwrites the version the catalog still points at.
 
 - **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
@@ -159,7 +160,7 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=` | Upload a multipart `file`; returns its `id` (a GUID), `storageKey`, size, checksum |
+| `POST` | `/api/v1/files?tenantId=&userId=` | Upload a multipart `file`; returns its `id` (a GUID), `folder` + `storageKey` (where it's stored), size, checksum |
 | `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
@@ -210,7 +211,7 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 dotnet run --project GM.FileStorage.Sample.API
 
 curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "6f1e…-…", "storageKey": "documents/9f/9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "folder": "documents/9f/", "fileName": "passport.pdf", "size": 12345, … }
 
 curl "http://localhost:5140/api/v1/files?tenantId=acme"
 curl -o passport.pdf "http://localhost:5140/api/v1/files/6f1e…/content"

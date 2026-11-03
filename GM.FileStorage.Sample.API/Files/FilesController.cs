@@ -21,8 +21,8 @@ namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
 /// Files Controller — upload, list, inspect, download, replace, delete, restore and presign files. A file is
-/// identified by one GUID (its id); where its bytes live is its <c>storageKey</c> (e.g. <c>documents/9f/9f1c….pdf</c>,
-/// laid out by <c>FileStorage:KeyTemplate</c>), shown in every response. The bytes live in the storage provider
+/// identified by one GUID (its id); where its bytes live is shown as <c>folder</c> + <c>storageKey</c> (e.g.
+/// <c>documents/9f/</c> + <c>9f1c….pdf</c>, laid out by <c>FileStorage:KeyTemplate</c>). The bytes live in the storage provider
 /// behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus its
 /// searchable metadata), which is what the list and details endpoints read.
 /// </summary>
@@ -36,7 +36,7 @@ public class FilesController : BaseController
     /// </summary>
     /// <remarks>
     /// Multipart <c>file</c>. Creates a new file identified by a GUID; its bytes are stored under a folder path from
-    /// <c>FileStorage:KeyTemplate</c>, returned as <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are
+    /// <c>FileStorage:KeyTemplate</c>, returned as <c>folder</c> + <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are
     /// recorded as the file's searchable metadata.
     /// </remarks>
     /// <param name="file">The file to store</param>

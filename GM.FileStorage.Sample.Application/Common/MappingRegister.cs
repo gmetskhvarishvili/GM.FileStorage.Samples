@@ -26,12 +26,17 @@ public class MappingRegister : IRegister
                 ? src.Value.ToString(AuditableDto.DateTimeFormat, CultureInfo.InvariantCulture)
                 : null);
 
-        // The metadata rows flatten to the name/value map the file was uploaded with (deleted rows left out).
+        // The metadata rows flatten to the name/value map the file was uploaded with (deleted rows left out); the
+        // storage key is shown as the object's name plus the folder it sits in.
         config.NewConfig<StoredFile, StoredFileDto>()
             .Map(dest => dest.Metadata, src => src.Metadata
-                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value));
+                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value))
+            .Map(dest => dest.StorageKey, src => StorageKeys.Name(src.StorageKey))
+            .Map(dest => dest.Folder, src => StorageKeys.Folder(src.StorageKey));
         config.NewConfig<StoredFile, StoredFileDetailsDto>()
             .Map(dest => dest.Metadata, src => src.Metadata
-                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value));
+                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value))
+            .Map(dest => dest.StorageKey, src => StorageKeys.Name(src.StorageKey))
+            .Map(dest => dest.Folder, src => StorageKeys.Folder(src.StorageKey));
     }
 }

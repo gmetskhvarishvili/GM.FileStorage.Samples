@@ -93,13 +93,15 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Upload: the file is a GUID; where its bytes went is visible — folders from the key template.
         var uploaded = await UploadAsync(client, original, "passport.pdf", "userId=u1");
         Assert.NotEqual(Guid.Empty, uploaded.Id);
-        Assert.Matches($@"^{_tenantId}/documents/([0-9a-f]{{2}})/\1[0-9a-f]{{30}}\.pdf$", uploaded.StorageKey);
-        Assert.True(File.Exists(Path.Combine(_root, uploaded.StorageKey)));
+        // Shown as the object's name plus the folder it sits in (the shard folder is the name's first two characters).
+        Assert.Matches(@"^[0-9a-f]{32}\.pdf$", uploaded.StorageKey);
+        Assert.Equal($"{_tenantId}/documents/{uploaded.StorageKey[..2]}/", uploaded.Folder);
+        Assert.True(File.Exists(Path.Combine(_root, uploaded.Folder + uploaded.StorageKey)));
         Assert.Equal(original.Length, uploaded.Size);
 
         // List by tenant: exactly this file, with its storage location and metadata.
         var listed = Assert.Single(await ListAsync(client, $"tenantId={_tenantId}"));
-        Assert.Equal((uploaded.Id, uploaded.StorageKey), (listed.Id, listed.StorageKey));
+        Assert.Equal((uploaded.Id, uploaded.StorageKey, uploaded.Folder), (listed.Id, listed.StorageKey, listed.Folder));
         Assert.Equal(_tenantId, listed.Metadata!["tenantId"]);
         Assert.Equal("u1", listed.Metadata!["userId"]);
         Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
@@ -111,7 +113,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");
         Assert.NotNull(details);
-        Assert.Equal(("passport.pdf", "application/pdf", uploaded.StorageKey), (details.FileName, details.ContentType, details.StorageKey));
+        Assert.Equal(("passport.pdf", "application/pdf", uploaded.StorageKey, uploaded.Folder), (details.FileName, details.ContentType, details.StorageKey, details.Folder));
         Assert.False(details.IsDeleted);
 
         // Download: byte-for-byte; presign: a link.
@@ -147,7 +149,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(replacement, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
 
         // The old version's bytes are gone: only the new location is stored. Still one row, one metadata row per name.
-        Assert.Equal(Path.GetFullPath(Path.Combine(_root, replaced.StorageKey)), Path.GetFullPath(Assert.Single(StoredObjects())), ignoreCase: true);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_root, replaced.Folder + replaced.StorageKey)), Path.GetFullPath(Assert.Single(StoredObjects())), ignoreCase: true);
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Id == uploaded.Id));
@@ -199,7 +201,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             context.Add(StorageCleanup.Create(abandonedKey, DateTime.UtcNow.AddSeconds(-1)));
             // A stray entry for bytes a live file still uses must not delete them.
-            context.Add(StorageCleanup.Create(live.StorageKey, DateTime.UtcNow.AddSeconds(-1)));
+            context.Add(StorageCleanup.Create(live.Folder + live.StorageKey, DateTime.UtcNow.AddSeconds(-1)));
             await context.SaveChangesAsync();
         }
         Assert.Equal(2, StoredObjects().Length);
@@ -349,11 +351,12 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         return result;
     }
 
-    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string StorageKey, string Folder, string FileName, string ContentType, long Size, string? Checksum);
 
     private sealed record StoredFileResponse(
         Guid Id,
         string StorageKey,
+        string Folder,
         string FileName,
         string ContentType,
         long Size,
