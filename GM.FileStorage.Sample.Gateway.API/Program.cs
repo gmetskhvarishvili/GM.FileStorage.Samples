@@ -5,10 +5,15 @@ using GM.Gateway;
 using GM.HealthChecks;
 using GM.RateLimiting.Http;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Kestrel:Limits from appsettings.json (the 60 MB request body cap, matching the files API). They aren't bound by
+// default, which left Kestrel's 30 MB in force.
+builder.Services.Configure<KestrelServerOptions>(builder.Configuration.GetSection("Kestrel"));
 
 // ---------------------------------------------------------------------------------------------
 // Counter store + lock for edge rate limiting. In-memory suits one gateway instance; with several,

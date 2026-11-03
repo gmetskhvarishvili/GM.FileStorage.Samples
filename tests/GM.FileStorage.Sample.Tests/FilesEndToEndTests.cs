@@ -6,6 +6,8 @@ using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
 using GM.Scheduling;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -19,6 +21,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Tests;
@@ -270,6 +273,53 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Large_uploads_are_streamed_into_storage_intact()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        // Well past the 64 KB at which ASP.NET would spill a buffered form to disk.
+        var bytes = new byte[3 * 1024 * 1024 + 17];
+        new Random(42).NextBytes(bytes);
+        "%PDF-1.7 "u8.CopyTo(bytes);
+
+        var uploaded = await UploadAsync(client, bytes, "scan.pdf", "userId=u1");
+
+        Assert.Equal(bytes.Length, uploaded.Size);
+        Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
+    }
+
+    [Fact]
+    public async Task An_oversized_upload_is_cut_off_without_reading_the_rest()
+    {
+        if (!_infraReady) return;
+
+        const int limit = 64 * 1024;
+        const int size = 8 * 1024 * 1024;
+        // Same storage root and key template as the other tests, with a small size limit, and a count of the request
+        // bytes the API has read by the time it starts answering.
+        var bodyRead = new BodyReadCounter();
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("FileStorage:MaxFileSize", limit.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .WithServices(services => services.AddSingleton<IStartupFilter>(bodyRead));
+        using var client = factory.CreateClient();
+
+        var bytes = new byte[size];
+        "%PDF-1.7 "u8.CopyTo(bytes);
+        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}", bytes, "huge.pdf", "application/pdf");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains($"{limit}-byte limit", await response.Content.ReadAsStringAsync());
+        // Refused soon after the limit: a server that buffered the form would have read all 8 MB first.
+        Assert.InRange(bodyRead.AtResponse, limit, 1024 * 1024);
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+    }
+
+    [Fact]
     public async Task Batch_upload_stores_each_file_and_reports_the_ones_it_refused()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
@@ -435,6 +485,57 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+
+    // Counts the request bytes the app reads, and notes how many it had read when the response started.
+    private sealed class BodyReadCounter : IStartupFilter
+    {
+        private long _read;
+
+        public long AtResponse { get; private set; } = -1;
+
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (context, nextMiddleware) =>
+            {
+                context.Request.Body = new CountingStream(context.Request.Body, this);
+                context.Response.OnStarting(() =>
+                {
+                    AtResponse = Interlocked.Read(ref _read);
+                    return Task.CompletedTask;
+                });
+                await nextMiddleware(context);
+            });
+            next(app);
+        };
+
+        private sealed class CountingStream(Stream inner, BodyReadCounter counter) : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override int Read(byte[] buffer, int offset, int count) => Count(inner.Read(buffer, offset, count));
+
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                Count(await inner.ReadAsync(buffer, cancellationToken));
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            private int Count(int read)
+            {
+                Interlocked.Add(ref counter._read, read);
+                return read;
+            }
+        }
+    }
 
     private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);
 

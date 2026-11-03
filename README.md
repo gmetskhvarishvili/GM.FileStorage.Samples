@@ -77,9 +77,17 @@ flowchart LR
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
   storage never keeps unreferenced objects.
+- **Uploads stream, never buffer.** The upload endpoints take no `IFormFile` (binding one makes ASP.NET buffer the
+  whole form, to disk past 64 KB, before any code runs). They read file parts straight off the request
+  (`Files/Multipart/MultipartFiles`) into storage, so a file over `FileStorage:MaxFileSize` is cut off as soon as
+  it passes the limit, without reading the rest. Swagger still shows the file pickers
+  (`MultipartUploadOperationFilter`).
 - **Batch uploads.** `POST /files/batch` takes up to 20 files and stores each as a single upload would (its own
   id, rules and transaction), answering with one result per file. A file that fails doesn't stop the rest, so a
-  client resends only the failed ones. The single-file endpoint refuses several files instead of dropping them.
+  client resends only the failed ones.
+- **Refusing a request after storing part of it.** Streaming means a second file (on the single endpoint) or a 21st
+  (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
+  for cleanup and deleted — and the request gets a 400 with nothing kept.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
@@ -184,8 +192,8 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file` (several → 400); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
-| `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`; returns one result per file, in order: the stored file, or why it wasn't stored |
+| `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
+| `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
 | `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
@@ -288,8 +296,8 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
-per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, range
-requests, the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They
+per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a 3 MB upload
+streamed intact, an oversized upload refused after reading little more than the limit, range requests, the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They
 need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

@@ -96,21 +96,23 @@ title: Upload — sequence
 ---
 sequenceDiagram
     autonumber
+    actor C as Client
     participant API
     participant DB
     participant S as Storage
 
-    API->>API: more than one file in the form? → 400 (use /files/batch)
+    C->>API: multipart body (still arriving)
+    API->>API: read up to the first file part (MultipartFiles, no buffering)
     API->>API: validate (file name, content type, ids)
     API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
-    API->>S: UploadAsync (streamed)
-    S->>S: check size, allowed type, bytes match type
-    alt rejected
+    API->>S: UploadAsync (the part's stream, straight off the request)
+    S->>S: check allowed type and bytes from the first bytes,<br/>count size as it streams
+    alt rejected (e.g. size passed the limit mid-stream)
         S-->>API: FileTooLarge / ContentTypeNotAllowed / ContentTypeMismatch
         API->>S: delete what was written
         API->>DB: delete the queued entry
-        API-->>API: 400 with the reason
+        API-->>C: 400 with the reason (the rest of the body is never read)
     else stored
         S-->>API: size, checksum, content type
         API->>DB: BEGIN
@@ -121,15 +123,25 @@ sequenceDiagram
         API->>DB: COMMIT
         alt commit failed
             API->>S: delete the new bytes (entry stays queued if this fails)
-            API-->>API: 500
-        else
-            API-->>API: 200 { id, storageKey: "9f1c….pdf", … }
+            API-->>C: 500
+        else committed
+            API->>API: read on: another file part?
+            alt yes
+                API->>DB: discard: remove the rows, queue the bytes (due now)
+                API->>S: delete the bytes (left queued if this fails)
+                API-->>C: 400 use /files/batch, nothing kept
+            else
+                API-->>C: 200 { id, storageKey: "9f1c….pdf", … }
+            end
         end
     end
 ```
 
 If the API crashes between the upload and the commit, the bytes exist but nothing points at them. The queued
 entry falls due 15 minutes later and the worker deletes them.
+
+Because the file is streamed, a second file part only shows up once the first is stored. Discarding it then, rather
+than soft-deleting it, keeps nothing the caller was never told about.
 
 ## Batch upload — sequence
 
@@ -147,13 +159,13 @@ sequenceDiagram
     participant DB
     participant S as Storage
 
-    C->>C: open a stream per file (already buffered by ASP.NET)
-    C->>B: UploadFilesCommand (files, tenantId, userId)
-    B->>B: validate: 1 to 20 files, ids
-    alt invalid
-        B-->>C: ValidationException → 400
-    end
-    loop each file, in the order sent
+    C->>B: UploadFilesCommand (file parts as they arrive, tenantId, userId)
+    B->>B: validate: tenantId, userId
+    loop each file part, as it arrives off the request
+        alt already 20 files
+            B->>DB: discard the stored files (rows removed, bytes queued and deleted)
+            B-->>C: BadRequestException → 400, nothing kept
+        end
         B->>U: UploadFileCommand (same tenant and user)
         U->>DB: queue the storage key
         U->>S: upload (rules checked)
@@ -169,8 +181,10 @@ sequenceDiagram
             B->>B: log it, result: failed, "try again"
         end
     end
+    alt no file parts at all
+        B-->>C: BadRequestException → 400
+    end
     B-->>C: one result per file
-    C->>C: dispose the streams
     C-->>C: 200 [results]
 ```
 

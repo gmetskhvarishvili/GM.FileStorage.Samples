@@ -1,11 +1,14 @@
 using GM.API.Startup;
+using GM.FileStorage.Sample.API.Files.Multipart;
 using GM.FileStorage.Sample.Infrastructure;
 using GM.FileStorage.Sample.Persistence;
 using GM.FileStorage.Sample.Persistence.Context;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Swashbuckle.AspNetCore.SwaggerGen;
 using System;
 using System.Linq;
 
@@ -16,6 +19,13 @@ var builder = ProgramExtension.CreateGMBuilder(args);
 // and validators discovered across the project assemblies), Mapster, RFC 7807 errors, request logging (file bodies
 // are described, never read or logged), localization, health checks.
 builder.Services.ConfigureGMServices(builder.Configuration, "DefaultCors", "SwaggerDocOptions");
+
+// Kestrel:Limits from appsettings.json (the 60 MB request body cap). GM's builder doesn't bind them, which left
+// Kestrel's 30 MB default in force.
+builder.Services.Configure<KestrelServerOptions>(builder.Configuration.GetSection("Kestrel"));
+
+// Uploads are read straight off the request body (no IFormFile), so Swagger is told about their file fields.
+builder.Services.Configure<SwaggerGenOptions>(options => options.OperationFilter<MultipartUploadOperationFilter>());
 
 // The catalog (stored files + their metadata rows) in PostgreSQL, and the storage backends + key strategy.
 builder.Services.AddPersistence(builder.Configuration);

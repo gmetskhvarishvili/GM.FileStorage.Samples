@@ -1,9 +1,11 @@
 using Asp.Versioning;
 using GM.API.Controllers;
 using GM.API.Models;
-using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
-using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
 using GM.Exceptions;
+using GM.FileStorage.Sample.API.Files.Multipart;
+using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
+using GM.FileStorage.Sample.Application.Files.Commands.DiscardFiles;
+using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFiles;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
@@ -15,7 +17,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,37 +43,54 @@ public class FilesController : BaseController
     /// Multipart <c>file</c>: exactly one (for several, use <c>POST files/batch</c>). Creates a new file identified by
     /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c>, the stored name returned as
     /// <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are recorded as the file's searchable metadata.
+    /// <para>
+    /// The file is streamed from the request straight into storage, never buffered: a file over
+    /// <c>FileStorage:MaxFileSize</c> is cut off as soon as it passes the limit.
+    /// </para>
     /// </remarks>
-    /// <param name="file">The file to store</param>
     /// <param name="request">Tenant and user (query string)</param>
     /// <param name="cancellationToken"></param>
     /// <returns>The stored file's id, storage key, size, checksum and content type</returns>
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
+    [StreamedMultipartUpload("file")]
     [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadFile(
-        IFormFile file,
         [FromQuery] UploadFileModel request,
         CancellationToken cancellationToken)
     {
-        // Model binding would take the first file and quietly drop the rest; refuse instead, so nothing is lost.
-        if (Request.Form.Files.Count > 1)
-        {
-            throw new BadRequestException(
-                $"This endpoint stores one file, but {Request.Form.Files.Count} were sent. Use POST api/v1/files/batch for several.");
-        }
-
-        // ASP.NET has already buffered the multipart body (in memory, or on disk past 64 KB); from there the file is
-        // streamed into storage.
-        await using var stream = file.OpenReadStream();
+        await using var files = MultipartFiles.ReadAsync(Request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        if (!await files.MoveNextAsync())
+            throw new BadRequestException("No file was sent.");
 
         var command = request.Adapt<UploadFileCommand>();
-        command.Content = stream;
-        command.FileName = file.FileName;
-        command.ContentType = ContentTypeOf(file);
-
+        command.Content = files.Current.Content;
+        command.FileName = files.Current.FileName;
+        command.ContentType = files.Current.ContentType;
         var response = await Mediator.Send(command, cancellationToken);
+
+        // Streaming means a second file is only seen once the first is stored. Rather than keep one file and quietly
+        // drop the rest, undo it and refuse the request. The same goes for a body that fails after the file (too
+        // large, cut off): the caller never gets the id, so nothing is kept.
+        bool more;
+        try
+        {
+            more = await files.MoveNextAsync();
+        }
+        catch
+        {
+            await Mediator.Send(new DiscardFilesCommand { Ids = [response.Id] }, CancellationToken.None);
+            throw;
+        }
+
+        if (more)
+        {
+            await Mediator.Send(new DiscardFilesCommand { Ids = [response.Id] }, CancellationToken.None);
+            throw new BadRequestException(
+                "This endpoint stores one file, but several were sent. Nothing was kept. Use POST api/v1/files/batch for several.");
+        }
+
         var result = response.Adapt<UploadedFileModel>();
         return Ok(result);
     }
@@ -82,45 +100,33 @@ public class FilesController : BaseController
     /// </summary>
     /// <remarks>
     /// Multipart <c>files</c>: 1 to 20 files, all for the same <c>tenantId</c> and <c>userId</c>. Each is stored as
-    /// <c>POST files</c> would store it, with its own id. The response lists every file in the order sent, with the
-    /// stored file or the reason it wasn't stored; one file failing doesn't stop the others. The whole request is
+    /// <c>POST files</c> would store it, with its own id, streamed straight into storage as it arrives. The response
+    /// lists every file in the order sent, with the stored file or the reason it wasn't stored; one file failing
+    /// doesn't stop the others. More than 20 files refuses the whole batch, keeping nothing. The whole request is
     /// still capped at the server's body limit (60 MB).
     /// </remarks>
-    /// <param name="files">The files to store</param>
     /// <param name="request">Tenant and user (query string)</param>
     /// <param name="cancellationToken"></param>
     /// <returns>One result per file, in the order sent</returns>
     [HttpPost("files/batch", Name = nameof(UploadFiles))]
     [Consumes("multipart/form-data")]
+    [StreamedMultipartUpload("files", Multiple = true)]
     [ProducesResponseType(typeof(IEnumerable<UploadFileResultModel>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadFiles(
-        List<IFormFile> files,
         [FromQuery] UploadFileModel request,
         CancellationToken cancellationToken)
     {
-        var streams = new List<Stream>(files.Count);
-        try
+        var command = new UploadFilesCommand
         {
-            var command = new UploadFilesCommand { TenantId = request.TenantId, UserId = request.UserId };
-            var items = new List<UploadFilesItem>(files.Count);
-            foreach (var file in files)
-            {
-                var stream = file.OpenReadStream();
-                streams.Add(stream);
-                items.Add(new UploadFilesItem { Content = stream, FileName = file.FileName, ContentType = ContentTypeOf(file) });
-            }
-            command.Files = items;
+            Files = MultipartFiles.ReadAsync(Request, cancellationToken),
+            TenantId = request.TenantId,
+            UserId = request.UserId,
+        };
 
-            var response = await Mediator.Send(command, cancellationToken);
-            var result = response.Adapt<IEnumerable<UploadFileResultModel>>();
-            return Ok(result);
-        }
-        finally
-        {
-            foreach (var stream in streams)
-                await stream.DisposeAsync();
-        }
+        var response = await Mediator.Send(command, cancellationToken);
+        var result = response.Adapt<IEnumerable<UploadFileResultModel>>();
+        return Ok(result);
     }
 
     /// <summary>
@@ -274,7 +280,4 @@ public class FilesController : BaseController
         var result = response.Adapt<PresignedUrlModel>();
         return Ok(result);
     }
-
-    private static string ContentTypeOf(IFormFile file) =>
-        string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
 }

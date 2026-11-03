@@ -83,7 +83,8 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
 
         // 2. Store the bytes. FileStorage:MaxFileSize / AllowedContentTypes / VerifyContentType are enforced inside
         // UploadAsync before anything is kept; a rejection is the caller's mistake, so it surfaces as a 400 with the
-        // reason. Any other failure leaves the pending entry, and the job removes whatever was partly written.
+        // reason. Any other failure (often the request stream itself: a body over the server's limit, a client gone)
+        // removes whatever was partly written straight away; if even that fails, the pending entry leaves it to the job.
         FileMetadata stored;
         try
         {
@@ -100,6 +101,11 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         {
             await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
             throw new BadRequestException(ex.Message);
+        }
+        catch
+        {
+            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            throw;
         }
 
         // 3. Record it, in one transaction.

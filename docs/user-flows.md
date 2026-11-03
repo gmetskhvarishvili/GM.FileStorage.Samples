@@ -66,20 +66,26 @@ files it holds.
 title: Upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> one{Exactly one file?}
-    one -- no, several --> m400[400 use /files/batch<br/>nothing stored]
-    one -- yes --> valid{File name, content type<br/>and ids valid?}
+    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> any{A file part?}
+    any -- no --> n400[400 no file sent]
+    any -- yes --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
-    valid -- yes --> rules{Upload rules pass?<br/>size · allowed type · bytes match type}
-    rules -- no --> r400[400 with the reason<br/>nothing kept]
+    valid -- yes --> rules{Upload rules pass?<br/>allowed type · bytes match type ·<br/>size, checked as it streams}
+    rules -- no --> r400[400 with the reason<br/>cut off at once, nothing kept]
     rules -- yes --> stored[Bytes stored at<br/>category/shard/id.ext]
     stored --> saved{Catalog saved?}
     saved -- no --> e500[500<br/>bytes deleted or queued]
-    saved -- yes --> ok[200 id, storageKey, fileName,<br/>contentType, size, checksum]
+    saved -- yes --> more{Another file part<br/>after it?}
+    more -- yes --> m400[400 use /files/batch<br/>the stored file is discarded]
+    more -- no --> ok[200 id, storageKey, fileName,<br/>contentType, size, checksum]
     ok --> next([Keep the id: every other call uses it])
 ```
 
 Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
+
+The file streams from the request straight into storage; nothing is buffered first. So a file over the size limit
+(50 MB) is refused as soon as it passes the limit, not after the whole upload. It also means a second file is only
+seen after the first is stored: the first is then discarded (rows and bytes, not a soft delete) and nothing is kept.
 
 ## Batch upload — user flow
 
@@ -88,10 +94,10 @@ Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
 title: Batch upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/batch<br/>multipart files, tenantId?, userId?]) --> count{1 to 20 files?}
-    count -- no --> c400[400<br/>nothing stored]
-    count -- yes --> each[[For each file, in order]]
-    each --> one{Stored as<br/>POST /files would?}
+    start([POST /api/v1/files/batch<br/>multipart files, tenantId?, userId?]) --> each[[Each file part, as it arrives]]
+    each --> limit{Already 20 files?}
+    limit -- yes --> c400[400 too many files<br/>the stored ones are discarded]
+    limit -- no --> one{Stored as<br/>POST /files would?}
     one -- yes --> okItem[succeeded: true<br/>file: id, storageKey, …]
     one -- "no: validation or upload rule" --> badItem[succeeded: false<br/>error: the reason]
     one -- "no: server fault" --> errItem[succeeded: false<br/>error: try again]
@@ -99,13 +105,16 @@ flowchart TD
     badItem --> more
     errItem --> more
     more -- yes --> each
-    more -- no --> ok[200 one result per file,<br/>in the order sent]
+    more -- no --> none{Any files at all?}
+    none -- no --> e400[400 no files sent]
+    none -- yes --> ok[200 one result per file,<br/>in the order sent]
     ok --> retry([Resend only the failed ones])
 ```
 
-Each file is a file of its own, with its own id, stored exactly as a single upload. One bad file doesn't stop the
-others, so the response is `200` even when some (or all) files failed: check `succeeded` on each result. The whole
-request is still capped at 60 MB.
+Each file is a file of its own, with its own id, stored exactly as a single upload, streamed as it arrives. One bad
+file doesn't stop the others, so the response is `200` even when some (or all) files failed: check `succeeded` on
+each result. A 21st file is only seen after 20 are stored; they're then discarded and the batch is refused, so a
+batch is all-or-nothing about its size. The whole request is still capped at 60 MB.
 
 ## List — user flow
 

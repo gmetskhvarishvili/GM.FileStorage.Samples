@@ -46,8 +46,8 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- |
 | [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, deleted, restored; content never changes |
 | [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | Route match, rate limits, 429 / 502 |
-| [Upload — user flow](user-flows.md#upload--user-flow) | One file, validation, upload rules, 200 / 400 |
-| [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | 1–20 files, one result each, retry the failed ones |
+| [Upload — user flow](user-flows.md#upload--user-flow) | One file streamed, validation, upload rules, 200 / 400 |
+| [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | 1–20 files, one result each, retry the failed ones; 21+ discards and refuses |
 | [List — user flow](user-flows.md#list--user-flow) | Filters and paging |
 | [Details — user flow](user-flows.md#details--user-flow) | Visible or deleted file, 200 / 404 |
 | [Download — user flow](user-flows.md#download--user-flow) | Whole file or a range, 200 / 206 / 404 / 416 |
@@ -62,8 +62,8 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- |
 | [Startup — sequence](sequence-diagrams.md#startup--sequence) | Secrets, migrations, job scheduling, the gateway's routes |
 | [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) | Rate-limit check, forwarding, 429 / 502 |
-| [Upload — sequence](sequence-diagrams.md#upload--sequence) | Queue, upload, one transaction, failures |
-| [Batch upload — sequence](sequence-diagrams.md#batch-upload--sequence) | One single upload per file, per-file results |
+| [Upload — sequence](sequence-diagrams.md#upload--sequence) | Streamed off the request, queue, upload, one transaction, failures, discard |
+| [Batch upload — sequence](sequence-diagrams.md#batch-upload--sequence) | One single upload per file as it arrives, per-file results, discard past 20 |
 | [List — sequence](sequence-diagrams.md#list--sequence) | Specification, count, page, mapping |
 | [Details — sequence](sequence-diagrams.md#details--sequence) | Visibility filter |
 | [Download — sequence](sequence-diagrams.md#download--sequence) | Ranges, missing bytes, 206 / 416 |

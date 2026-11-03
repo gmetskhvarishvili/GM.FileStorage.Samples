@@ -111,6 +111,16 @@ See [Storage layout](../README.md#storage-layout) for the placeholders and other
 }
 ```
 
+Two size limits apply, and an upload is streamed, so both cut it off as soon as they're passed:
+
+| Limit | Setting | Over it |
+| --- | --- | --- |
+| One file: 50 MB | `FileStorage:MaxFileSize` (API) | `400` naming the limit; nothing kept |
+| One request: 60 MB | `Kestrel:Limits:MaxRequestBodySize` (gateway and API) | `413`; nothing kept, not even earlier files of a batch |
+
+Kestrel doesn't read its `Limits` from configuration on its own, so both hosts bind the `Kestrel` section
+explicitly; without that, its 30 MB default applies.
+
 Anything else gets a `400` that names the type. To allow more, add its media type (or a `type/*` pattern) to
 `AllowedContentTypes` in the API's appsettings.json; Excel, for example, is `application/vnd.ms-excel` and
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
