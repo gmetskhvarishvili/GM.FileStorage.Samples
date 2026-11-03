@@ -6,7 +6,9 @@
   </Folder>
   <Folder Name="/Solution Items/Docs/">
     <File Path="docs/architecture.md" />
-    <File Path="docs/request-flows.md" />
+    <File Path="docs/dependencies.md" />
+    <File Path="docs/user-flows.md" />
+    <File Path="docs/sequence-diagrams.md" />
     <File Path="docs/configuration.md" />
   </Folder>
   <Folder Name="/Solution Items/Build/">

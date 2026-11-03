@@ -127,5 +127,5 @@ anything.
 | Worker | In-memory GM.DistributedLock | `GM.DistributedLock.Redis`, so one worker runs the job at a time. Claiming entries by their `due_at_utc` token keeps it safe even without a shared lock |
 | Storage | Local folder shared by API and worker | S3 or Azure Blob; a local folder only works when every process sees the same disk |
 
-See [request flows](request-flows.md) for what happens on each call and [configuration](configuration.md)
+See [dependencies](dependencies.md), [user flows](user-flows.md) and [sequence diagrams](sequence-diagrams.md) for what happens on each call, and [configuration](configuration.md)
 for the settings.

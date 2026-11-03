@@ -37,8 +37,15 @@ flowchart LR
     worker --> store
 ```
 
-**Docs:** [architecture](docs/architecture.md) · [request flows](docs/request-flows.md) ·
-[configuration](docs/configuration.md)
+**Docs**
+
+| Doc | Diagrams |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Processes, layers, data model, scaling out |
+| [Dependencies](docs/dependencies.md) | Runtime calls, project references, packages, classes behind a request, domain model |
+| [User flows](docs/user-flows.md) | File lifecycle, the gateway's checks, and one flowchart per action with every outcome |
+| [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
+| [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
 > The catalog packages (`GM.FileStorage.Domain` / `GM.FileStorage.Persistence`) ship in GM.FileStorage
 > **1.2.0**; every `GM.FileStorage*` reference here is pinned to that version (they release in lockstep).
