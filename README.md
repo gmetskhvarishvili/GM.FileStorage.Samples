@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
-date-based keys, delete and presigned links through the
+flat random keys, delete and presigned links through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
 metadata, so files can be listed by tenant or user, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
@@ -43,7 +43,7 @@ work / domain-event store / actor auditing). The layout mirrors
 ## What it demonstrates
 
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`
-  under a generated key, `{yyyy}/{MM}/{dd}/{guid}{ext}` (GM.FileStorage's default strategy). Tenant and user
+  under a generated key that is just `{guid}{ext}` (`FlatFileKeyStrategy`: no folders, no date). Tenant and user
   aren't part of the key: they travel as upload metadata. It then records a `StoredFile` row plus one
   `StoredFileMetadata` row per pair and saves through the unit of work. If the save fails, the uploaded bytes
   are deleted and the error rethrown, so storage never keeps unreferenced objects.
@@ -174,12 +174,12 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 dotnet run --project GM.FileStorage.Sample.API
 
 curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "…", "key": "2026/11/03/9f1c…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "…", "key": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
 curl "http://localhost:5140/api/v1/files?tenantId=acme"
-curl -O "http://localhost:5140/api/v1/files/2026/11/03/9f1c…a3.pdf"
-curl -X DELETE "http://localhost:5140/api/v1/files/2026/11/03/9f1c…a3.pdf"
-curl -X POST "http://localhost:5140/api/v1/restore/2026/11/03/9f1c…a3.pdf"
+curl -O "http://localhost:5140/api/v1/files/9f1cb2…a3.pdf"
+curl -X DELETE "http://localhost:5140/api/v1/files/9f1cb2…a3.pdf"
+curl -X POST "http://localhost:5140/api/v1/restore/9f1cb2…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO

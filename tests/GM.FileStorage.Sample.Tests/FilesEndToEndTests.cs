@@ -87,9 +87,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: a generated date-based key (tenant and user aren't in it), recorded in the catalog.
+        // Upload: a generated key that is just {guid}{ext} (no tenant, user, date or folders), recorded in the catalog.
         var uploaded = await UploadAsync(client, original, "passport.pdf", $"tenantId={_tenantId}&userId=u1");
-        Assert.Matches(@"^\d{4}/\d{2}/\d{2}/[0-9a-f]{32}\.pdf$", uploaded.Key);
+        Assert.Matches(@"^[0-9a-f]{32}\.pdf$", uploaded.Key);
         Assert.DoesNotContain(_tenantId, uploaded.Key, StringComparison.Ordinal);
         Assert.Equal(original.Length, uploaded.Size);
         Assert.NotEqual(Guid.Empty, uploaded.Id);
@@ -102,9 +102,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal("u1", listed.Metadata!["userId"]);
         Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
         Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&userId=someone-else"));
-        var datePrefix = uploaded.Key[..11]; // yyyy/MM/dd/
-        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix={Uri.EscapeDataString(datePrefix)}"));
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=1999%2F"));
+        var keyStart = uploaded.Key[..8];
+        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix={keyStart}"));
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=zz"));
 
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");
@@ -291,8 +291,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         using var client = _factory.CreateClient();
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 encoded key");
-        var uploaded = await UploadAsync(client, original, "e.pdf", $"tenantId={_tenantId}&userId=u1");
-        var encoded = Uri.EscapeDataString(uploaded.Key); // tenants%2F…%2Fusers%2Fu1%2F….pdf
+        // Generated keys have no slashes, but explicit ones may: upload to one that does.
+        var uploaded = await UploadAsync(client, original, "e.pdf",
+            $"tenantId={_tenantId}&userId=u1&key={Uri.EscapeDataString($"{_tenantId}/docs/e.pdf")}");
+        var encoded = Uri.EscapeDataString(uploaded.Key); // {tenant}%2Fdocs%2Fe.pdf
         Assert.Contains("%2F", encoded, StringComparison.Ordinal);
 
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{encoded}"));
