@@ -159,6 +159,23 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Replacing_content_without_tenant_or_user_keeps_them()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var uploaded = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 v1"), "a.pdf", "userId=u1");
+
+        // No tenantId/userId on the replace: the file stays where it was, not under "public"/"anon".
+        var response = await SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{uploaded.Id}/content",
+            Encoding.UTF8.GetBytes("%PDF-1.7 v2"), "a.pdf", "application/pdf");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var listed = Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
+        Assert.Equal(uploaded.Id, listed.Id);
+    }
+
+    [Fact]
     public async Task Racing_replacements_leave_one_consistent_version()
     {
         if (!_infraReady) return;

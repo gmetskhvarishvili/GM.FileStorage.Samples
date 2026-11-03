@@ -77,22 +77,27 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows.
-        var metadata = new Dictionary<string, string>
-        {
-            [StoredFileMetadataNames.TenantId] = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId,
-            [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
-        };
-
         // A replacement targets an existing file (deleted or not), checked before any bytes are stored. Tracked, so
         // the save checks the row still has the storage key read here (its concurrency token).
         StoredFile? existing = null;
+        var current = new Dictionary<string, string>();
         if (request.Id is { } id)
         {
             existing = await unitOfWork.StoredFileRepository
                 .FirstOrDefaultAsync(x => x.Id == id, false, null, cancellationToken)
                 ?? throw new NotFoundException(StringResource.StoredFile, StringResource.Id, id);
+            current = (await unitOfWork.StoredFileMetadataRepository
+                    .FindAsync(x => x.StoredFileId == id && !x.IsDeleted, true, null, cancellationToken))
+                .ToDictionary(x => x.Name, x => x.Value);
         }
+
+        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows. A replacement keeps the
+        // file's tenant and user unless new ones are given; a new file without them gets "public" / "anon".
+        var metadata = new Dictionary<string, string>
+        {
+            [StoredFileMetadataNames.TenantId] = Pick(request.TenantId, current, StoredFileMetadataNames.TenantId, "public"),
+            [StoredFileMetadataNames.UserId] = Pick(request.UserId, current, StoredFileMetadataNames.UserId, "anon"),
+        };
 
         // Where these bytes go: a fresh path from FileStorage:KeyTemplate. It's needed before the upload (it's queued
         // first), so it's built from the declared content type; with FileStorage:VerifyContentType on, a declaration
@@ -192,6 +197,11 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             Checksum = entity.Checksum,
         };
     }
+
+    private static string Pick(string? given, Dictionary<string, string> current, string name, string fallback) =>
+        !string.IsNullOrWhiteSpace(given) ? given
+        : current.TryGetValue(name, out var existing) ? existing
+        : fallback;
 
     // Makes the file's metadata rows match the upload: changes or restores the rows that exist (a name is unique
     // per file, deleted or not), adds the new names, and soft-removes the names the upload no longer carries.
