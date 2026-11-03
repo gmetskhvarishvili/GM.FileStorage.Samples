@@ -32,7 +32,7 @@ work / domain-event store / actor auditing). The layout mirrors
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, key prefix, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, storage folder, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure`: GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the storage-cleanup job, the database readiness check |
@@ -42,18 +42,21 @@ work / domain-event store / actor auditing). The layout mirrors
 
 ## What it demonstrates
 
-- **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`
-  under a key from `FileStorage:KeyTemplate`, `{category}/{shard}/{id}{ext}` (see below). Tenant and user
-  aren't part of the key: they travel as upload metadata. It then records a `StoredFile` row plus one
-  `StoredFileMetadata` row per pair and saves through the unit of work. If the save fails, the uploaded bytes
-  are deleted and the error rethrown, so storage never keeps unreferenced objects.
-- **One row per key.** Uploading to an existing key — even a deleted one — calls `StoredFile.Replace`, which
-  restores the row, and syncs the metadata rows (changed, restored, added or soft-removed).
+- **One GUID per file; its storage location shown.** A file is identified by a GUID, its id, which is also
+  its key; every route uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate` (see
+  below), and that location comes back as `storageKey` in every response.
+- **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
+  then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
+  through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
+  storage never keeps unreferenced objects.
+- **Replace content.** `PUT /files/{id}/content` calls `StoredFile.Replace`: same id, new storage
+  location. It restores a deleted file and syncs the metadata rows (changed, restored, added or
+  soft-removed).
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
   and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
 - **Searchable metadata.** The list filters by tenant/user with `Metadata.Any(...)` sub-queries served by the
-  `(name, value)` index, plus key prefix and content type, with GM.API paging (`X-Pagination` header).
+  `(name, value)` index, plus storage folder and content type, with GM.API paging (`X-Pagination` header).
 - **Domain events.** `GMStoredFileUploaded/Replaced/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -63,26 +66,29 @@ work / domain-event store / actor auditing). The layout mirrors
   (ready includes the database), request logging that describes upload/download bodies instead of reading
   them, RFC 7807 errors (`NotFoundException` → 404), and secrets layered into configuration.
 
-## Key layout
+## Storage layout
 
-Generated keys come from `FileStorage:KeyTemplate` in appsettings.json, with no code involved:
+A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is a separate
+**storage key**, made from `FileStorage:KeyTemplate` in appsettings.json, with no code involved:
 
 ```jsonc
 "KeyTemplate": "{category}/{shard}/{id}{ext}"   // → documents/9f/9f1cb2…a3.pdf, images/4e/4e07…png
 ```
 
+Every response shows it as `storageKey`, so you can see where each file lives. Every upload gets a
+fresh storage key, so replacing a file never overwrites the version the catalog still points at.
+
 - **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
   from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
   type is rejected, so a renamed `.exe` can't land in `images/`.
-  - The sample builds the key before uploading, from the declared type, so an `application/octet-stream`
-    upload lands in `other/`.
-  - When the library generates the key itself (no versioned storage keys), it uses the detected type
-    instead.
-- **`{shard}` spreads files out.** It's the id's first two characters, so files spread over 256 folders
-  per category and no folder grows huge.
-- **`{id}{ext}` is a random id plus the file's extension, cleaned up.** `{id}` is required, so keys
-  never collide.
-- **Nothing identifying.** Tenant, user and date stay out of the key. They're searchable metadata in
+  - The sample builds the storage key before uploading, from the declared type, so an
+    `application/octet-stream` upload lands in `other/`.
+  - When the library generates the key itself, it uses the detected type instead.
+- **`{shard}` spreads files out.** It's the first two characters of `{id}`, so files spread over 256
+  folders per category and no folder grows huge.
+- **`{id}{ext}` is a random id plus the file's extension, cleaned up.** `{id}` is required, so
+  storage keys never collide.
+- **Nothing identifying.** Tenant, user and date stay out of the path. They're searchable metadata in
   the catalog, which is how files are found.
 - **Other layouts are a config change.**
   - `{date:yyyy/MM}/{id}{ext}` gives date folders.
@@ -90,7 +96,7 @@ Generated keys come from `FileStorage:KeyTemplate` in appsettings.json, with no 
     before use, so they can't add folders or `..`.
   - The template is checked at startup, so a typo fails fast.
 
-The category folder also works as a list filter, for example `GET /api/v1/files?keyPrefix=images/`.
+The folders also work as a list filter, for example `GET /api/v1/files?folder=images/`.
 
 ## Keeping storage and the database in step
 
@@ -98,13 +104,13 @@ The bytes (in `IFileStorageService`) and the catalog row (in Postgres) can't sha
 sample orders its steps so that any failure leaves at worst bytes nothing points at, and those are
 always queued for deletion in the `storage_cleanups` table.
 
-- **Versioned storage keys.** Every upload is stored under its own key, `{key}~{version}`, recorded
-  as `StoredFile.StorageKey`. A replacement never overwrites bytes the catalog still points at.
+- **A fresh storage key per upload.** Every upload is stored at its own path from the key template,
+  recorded as `StoredFile.StorageKey`. A replacement never overwrites bytes the catalog still points at.
 - **Upload** ([UploadFileCommand](GM.FileStorage.Sample.Application/Files/Commands/UploadFile/UploadFileCommand.cs)):
   1. Queue the new storage key for cleanup, due in 15 minutes, before any bytes exist.
   2. Upload the bytes.
-  3. In one transaction: point the row at the new key, sync its metadata, drop the queued entry,
-     and queue the previous version's key.
+  3. In one transaction: create the row or point it at the new storage key, sync its metadata, drop the
+     queued entry, and queue the previous version's storage key.
   4. Delete the previous version.
 
   | If this happens… | …the result |
@@ -112,8 +118,8 @@ always queued for deletion in the `storage_cleanups` table.
   | A crash after step 2 | The bytes are unreferenced and queued; the job deletes them. |
   | Step 3 fails | The row is unchanged, and the new bytes are deleted (or left queued). |
   | Step 4 fails | The old version stays queued. |
-- **Racing uploads to one key.** `StorageKey` is a concurrency token and `Key` is unique, so one
-  upload wins and the others get a 400 asking them to retry. Their bytes are cleaned up.
+- **Racing replacements of one file.** `StorageKey` is a concurrency token, so one upload wins and
+  the others get a 400 asking them to retry. Their bytes are cleaned up.
 - **Delete** only marks the row deleted and keeps its bytes, so nothing is queued and a restore is instant.
 - **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute):
   - It carries out due entries, backing off on failures (1, 2, 4 … minutes, at most an hour).
@@ -153,13 +159,14 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=&key=` | Upload a multipart `file`; returns id, key, size, checksum. `key` (optional) uploads to an explicit key and replaces/restores it |
-| `GET` | `/api/v1/files?tenantId=&userId=&keyPrefix=&contentType=&currentPage=&pageSize=` | Paged list of catalogued files, metadata included |
-| `GET` | `/api/v1/files/{id}` | File details by catalog id (`?visibility=All` includes deleted files) |
-| `GET` | `/api/v1/files/{**key}` | Download the file (streamed) |
-| `DELETE` | `/api/v1/files/{**key}` | Mark the file deleted (the bytes are kept) |
-| `POST` | `/api/v1/restore/{**key}` | Restore a deleted file as it was |
-| `GET` | `/api/v1/presign/{**key}` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
+| `POST` | `/api/v1/files?tenantId=&userId=` | Upload a multipart `file`; returns its `id` (a GUID), `storageKey`, size, checksum |
+| `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
+| `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
+| `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
+| `PUT` | `/api/v1/files/{id}/content?tenantId=&userId=` | Replace the content (multipart `file`); same id, new storage key; restores a deleted file |
+| `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
+| `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
+| `GET` | `/api/v1/files/{id}/presign` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
@@ -203,12 +210,13 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 dotnet run --project GM.FileStorage.Sample.API
 
 curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "…", "key": "documents/9f/9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "6f1e…-…", "storageKey": "documents/9f/9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
 curl "http://localhost:5140/api/v1/files?tenantId=acme"
-curl -O "http://localhost:5140/api/v1/files/documents/9f/9f1cb2…a3.pdf"
-curl -X DELETE "http://localhost:5140/api/v1/files/documents/9f/9f1cb2…a3.pdf"
-curl -X POST "http://localhost:5140/api/v1/restore/documents/9f/9f1cb2…a3.pdf"
+curl -o passport.pdf "http://localhost:5140/api/v1/files/6f1e…/content"
+curl -X PUT -F "file=@passport-v2.pdf" "http://localhost:5140/api/v1/files/6f1e…/content"
+curl -X DELETE "http://localhost:5140/api/v1/files/6f1e…"
+curl -X POST "http://localhost:5140/api/v1/files/6f1e…/restore"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO
@@ -227,8 +235,8 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
-against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/key prefix → details →
-download → presign → delete (row marked deleted, bytes kept) → restore → re-upload to the same key. They
+against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
+download → presign → delete (row marked deleted, bytes kept) → restore → replace the content. They
 need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

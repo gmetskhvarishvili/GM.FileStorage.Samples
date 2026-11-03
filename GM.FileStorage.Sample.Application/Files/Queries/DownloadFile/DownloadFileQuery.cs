@@ -16,7 +16,7 @@ namespace GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 /// </summary>
 public class DownloadFileQuery : IRequest<FileContentDto>
 {
-    public string? Key { get; set; }
+    public Guid Id { get; set; }
 
     /// <summary>Just this slice (an HTTP <c>Range</c> request); null for the whole file.</summary>
     public FileByteRange? Range { get; set; }
@@ -29,7 +29,7 @@ public class DownloadFileQueryValidator : AbstractValidator<DownloadFileQuery>
 {
     public DownloadFileQueryValidator()
     {
-        RuleFor(x => x.Key).NotNull().NotEmpty();
+        RuleFor(x => x.Id).NotEmpty();
     }
 }
 
@@ -39,7 +39,7 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
     public async Task<FileContentDto> Handle(DownloadFileQuery request, CancellationToken cancellationToken)
     {
         var entity = await unitOfWork.StoredFileRepository
-            .FirstOrDefaultAsync(x => x.Key == request.Key
+            .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && x.IsActive
                                       && !x.IsDeleted
                                       && !x.IsHidden,
@@ -51,8 +51,8 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
         FileDownloadResult download;
@@ -70,8 +70,8 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
             // Catalogued but missing from storage (removed out of band): to the caller it's just not there.
             throw new NotFoundException(
                 StringResource.File,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
         // The caller owns the stream (the API hands it to a FileStreamResult, which disposes it).

@@ -20,9 +20,11 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
-/// Files Controller — upload, list, inspect, download, delete and presign files. The bytes live in the storage
-/// provider behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus
-/// its searchable metadata), which is what the list and details endpoints read.
+/// Files Controller — upload, list, inspect, download, replace, delete, restore and presign files. A file is
+/// identified by one GUID (its id); where its bytes live is its <c>storageKey</c> (e.g. <c>documents/9f/9f1c….pdf</c>,
+/// laid out by <c>FileStorage:KeyTemplate</c>), shown in every response. The bytes live in the storage provider
+/// behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus its
+/// searchable metadata), which is what the list and details endpoints read.
 /// </summary>
 [ApiController]
 [ApiVersion("1.0")]
@@ -33,39 +35,50 @@ public class FilesController : BaseController
     /// Upload File
     /// </summary>
     /// <remarks>
-    /// Multipart <c>file</c>, stored under a key from <c>FileStorage:KeyTemplate</c> (<c>documents/9f/9f1c….pdf</c>). <c>tenantId</c> and
-    /// <c>userId</c> are recorded as the file's searchable metadata (not part of the key). Send
-    /// <c>key</c> to upload to an explicit key instead — uploading to an existing (or deleted) key replaces it.
+    /// Multipart <c>file</c>. Creates a new file identified by a GUID; its bytes are stored under a folder path from
+    /// <c>FileStorage:KeyTemplate</c>, returned as <c>storageKey</c>. <c>tenantId</c> and <c>userId</c> are
+    /// recorded as the file's searchable metadata.
     /// </remarks>
     /// <param name="file">The file to store</param>
-    /// <param name="request">Tenant, user and optional explicit key (query string)</param>
+    /// <param name="request">Tenant and user (query string)</param>
     /// <param name="cancellationToken"></param>
-    /// <returns>The stored file's id, key, size, checksum and content type</returns>
+    /// <returns>The stored file's id, storage key, size, checksum and content type</returns>
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
-    public async Task<IActionResult> UploadFile(
+    public Task<IActionResult> UploadFile(
         IFormFile file,
         [FromQuery] UploadFileModel request,
-        CancellationToken cancellationToken)
-    {
-        // Streamed from the request straight into storage; never buffered whole.
-        await using var stream = file.OpenReadStream();
+        CancellationToken cancellationToken) =>
+        UploadAsync(null, file, request, cancellationToken);
 
-        var command = request.Adapt<UploadFileCommand>();
-        command.Content = stream;
-        command.FileName = file.FileName;
-        command.ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
-
-        var response = await Mediator.Send(command, cancellationToken);
-        var result = response.Adapt<UploadedFileModel>();
-        return Ok(result);
-    }
+    /// <summary>
+    /// Replace File Content
+    /// </summary>
+    /// <remarks>
+    /// Multipart <c>file</c>: new content for an existing file (a deleted one is restored). The id stays the same;
+    /// the bytes get a new <c>storageKey</c> and the previous version is removed.
+    /// </remarks>
+    /// <param name="id">The file to replace</param>
+    /// <param name="file">The new content</param>
+    /// <param name="request">Tenant and user (query string)</param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>The file's id, new storage key, size, checksum and content type</returns>
+    [HttpPut("files/{id:guid}/content", Name = nameof(ReplaceFileContent))]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+    public Task<IActionResult> ReplaceFileContent(
+        [FromRoute] Guid id,
+        IFormFile file,
+        [FromQuery] UploadFileModel request,
+        CancellationToken cancellationToken) =>
+        UploadAsync(id, file, request, cancellationToken);
 
     /// <summary>
     /// Get Files List
     /// </summary>
-    /// <param name="request">Files list filters (tenant, user, key prefix, …) and paging</param>
+    /// <param name="request">Files list filters (tenant, user, storage folder, …) and paging</param>
     /// <param name="cancellationToken"></param>
     /// <returns>IEnumerable of stored files</returns>
     [HttpGet("files", Name = nameof(GetFilesList))]
@@ -85,10 +98,10 @@ public class FilesController : BaseController
     /// <summary>
     /// Get File Details
     /// </summary>
-    /// <param name="id">Stored file Id to get</param>
+    /// <param name="id">The file's id</param>
     /// <param name="request">Visibility scope (query string); defaults to visible-only. Widen it to inspect a deleted file.</param>
     /// <param name="cancellationToken"></param>
-    /// <returns>Stored file details, metadata included</returns>
+    /// <returns>Stored file details — storage key and metadata included</returns>
     [HttpGet("files/{id:guid}", Name = nameof(GetFileDetails))]
     [ProducesResponseType(typeof(StoredFileDetailsModel), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
@@ -110,18 +123,18 @@ public class FilesController : BaseController
     /// <c>bytes=1024-</c>, <c>bytes=-500</c>) with <c>206 Partial Content</c>, so video players can seek and
     /// downloads can resume; only the requested bytes are read from storage.
     /// </remarks>
-    /// <param name="key">The file's storage key</param>
+    /// <param name="id">The file's id</param>
     /// <param name="cancellationToken"></param>
-    [HttpGet("files/{**key}", Name = nameof(DownloadFile))]
+    [HttpGet("files/{id:guid}/content", Name = nameof(DownloadFile))]
     [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status206PartialContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> DownloadFile(
-        [FromRoute] string key,
+        [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var query = new DownloadFileQuery { Key = DecodeKey(key) };
+        var query = new DownloadFileQuery { Id = id };
         var requested = Request.GetTypedHeaders().Range;
         // One range only; for several (rare), RFC 9110 lets us send the whole file instead.
         if (requested is { Unit.Value: "bytes", Ranges.Count: 1 } && requested.Ranges.Single() is var r)
@@ -163,19 +176,19 @@ public class FilesController : BaseController
     /// Delete File
     /// </summary>
     /// <remarks>
-    /// Marks the file deleted in the catalog; its bytes stay in storage, so <c>POST /restore/{key}</c> brings it
+    /// Marks the file deleted in the catalog; its bytes stay in storage, so <c>POST /files/{id}/restore</c> brings it
     /// back as it was.
     /// </remarks>
-    /// <param name="key">The file's key</param>
+    /// <param name="id">The file's id</param>
     /// <param name="cancellationToken"></param>
-    [HttpDelete("files/{**key}", Name = nameof(DeleteFile))]
+    [HttpDelete("files/{id:guid}", Name = nameof(DeleteFile))]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteFile(
-        [FromRoute] string key,
+        [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        await Mediator.Send(new DeleteFileCommand { Key = DecodeKey(key) }, cancellationToken);
+        await Mediator.Send(new DeleteFileCommand { Id = id }, cancellationToken);
         return NoContent();
     }
 
@@ -183,16 +196,16 @@ public class FilesController : BaseController
     /// Restore File
     /// </summary>
     /// <remarks>Brings a deleted file back with the content and metadata it had; nothing is re-uploaded.</remarks>
-    /// <param name="key">The file's key</param>
+    /// <param name="id">The file's id</param>
     /// <param name="cancellationToken"></param>
-    [HttpPost("restore/{**key}", Name = nameof(RestoreFile))]
+    [HttpPost("files/{id:guid}/restore", Name = nameof(RestoreFile))]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RestoreFile(
-        [FromRoute] string key,
+        [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        await Mediator.Send(new RestoreFileCommand { Key = DecodeKey(key) }, cancellationToken);
+        await Mediator.Send(new RestoreFileCommand { Id = id }, cancellationToken);
         return NoContent();
     }
 
@@ -200,23 +213,35 @@ public class FilesController : BaseController
     /// Presign File
     /// </summary>
     /// <remarks>A time-limited link to a file (needs <c>FileStorage:Local:PublicBaseUrl</c> for the local provider).</remarks>
-    /// <param name="key">The file's storage key</param>
+    /// <param name="id">The file's id</param>
     /// <param name="cancellationToken"></param>
-    [HttpGet("presign/{**key}", Name = nameof(PresignFile))]
+    [HttpGet("files/{id:guid}/presign", Name = nameof(PresignFile))]
     [ProducesResponseType(typeof(PresignedUrlModel), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> PresignFile(
-        [FromRoute] string key,
+        [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var response = await Mediator.Send(new GetFilePresignedUrlQuery { Key = DecodeKey(key) }, cancellationToken);
+        var response = await Mediator.Send(new GetFilePresignedUrlQuery { Id = id }, cancellationToken);
         var result = response.Adapt<PresignedUrlModel>();
         return Ok(result);
     }
 
-    // Keys contain slashes (documents/9f/9f1c….pdf, or an explicit docs/a.pdf). A client may send
-    // it as-is or URL-encoded — Swagger UI encodes path parameters, giving docs%2Fa.pdf — and ASP.NET Core leaves
-    // %2F encoded in a {**key} route value, so decode it here; both forms then find the same file. (A key with a
-    // literal '%' would need it sent as %25.)
-    private static string DecodeKey(string key) => Uri.UnescapeDataString(key);
+    // Upload and replace share this: null id uploads a new file, otherwise it replaces that file's content.
+    private async Task<IActionResult> UploadAsync(
+        Guid? id, IFormFile file, UploadFileModel request, CancellationToken cancellationToken)
+    {
+        // Streamed from the request straight into storage; never buffered whole.
+        await using var stream = file.OpenReadStream();
+
+        var command = request.Adapt<UploadFileCommand>();
+        command.Id = id;
+        command.Content = stream;
+        command.FileName = file.FileName;
+        command.ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+
+        var response = await Mediator.Send(command, cancellationToken);
+        var result = response.Adapt<UploadedFileModel>();
+        return Ok(result);
+    }
 }

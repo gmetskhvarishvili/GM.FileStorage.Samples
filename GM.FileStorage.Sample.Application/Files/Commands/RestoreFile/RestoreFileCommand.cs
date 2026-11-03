@@ -3,6 +3,7 @@ using GM.Exceptions;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,14 +15,14 @@ namespace GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
 /// </summary>
 public class RestoreFileCommand : IRequest
 {
-    public string? Key { get; set; }
+    public Guid Id { get; set; }
 }
 
 public class RestoreFileCommandValidator : AbstractValidator<RestoreFileCommand>
 {
     public RestoreFileCommandValidator()
     {
-        RuleFor(x => x.Key).NotNull().NotEmpty();
+        RuleFor(x => x.Id).NotEmpty();
     }
 }
 
@@ -31,15 +32,15 @@ public class RestoreFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServi
     public async Task Handle(RestoreFileCommand request, CancellationToken cancellationToken)
     {
         var entity = await unitOfWork.StoredFileRepository
-            .FirstOrDefaultAsync(x => x.Key == request.Key && x.IsDeleted, true, null, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.Id && x.IsDeleted, true, null, cancellationToken);
 
         // Restoring only makes sense when the bytes are still there (they could have been removed out of band).
         if (entity == null || !await storage.ExistsAsync(entity.StorageKey, cancellationToken))
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
         entity.RestoreAll();

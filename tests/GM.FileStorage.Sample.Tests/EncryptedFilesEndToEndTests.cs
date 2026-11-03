@@ -102,16 +102,16 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         Assert.DoesNotContain("X1234567", Encoding.UTF8.GetString(storedBytes), StringComparison.Ordinal);
 
         // Over HTTP: the original bytes, ranges included.
-        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Key}"));
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/files/{uploaded.Key}");
+        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/files/{uploaded.Id}/content");
         request.Headers.Range = new RangeHeaderValue(25, 32);
         var range = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.PartialContent, range.StatusCode);
         Assert.Equal("X1234567", await range.Content.ReadAsStringAsync());
 
         // A presigned link would serve ciphertext, so it's refused.
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/presign/{uploaded.Key}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/presign")).StatusCode);
     }
 
-    private sealed record UploadResponse(Guid Id, string Key, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
 }

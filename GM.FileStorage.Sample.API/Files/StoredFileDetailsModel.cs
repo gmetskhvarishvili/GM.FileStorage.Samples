@@ -9,12 +9,12 @@ namespace GM.FileStorage.Sample.API.Files;
 /// <summary>Stored file details model.</summary>
 public class StoredFileDetailsModel : AuditableModel
 {
-    /// <summary>The catalog id.</summary>
+    /// <summary>The file's identifier (a GUID): use it for every other call.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "Id")]
     public Guid Id { get; set; }
-    /// <summary>The storage key.</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "Key")]
-    public string? Key { get; set; }
+    /// <summary>Where the bytes are stored, e.g. <c>documents/9f/9f1c….pdf</c>.</summary>
+    [Display(ResourceType = typeof(StringResource), Name = "StorageKey")]
+    public string? StorageKey { get; set; }
     /// <summary>The original file name.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "FileName")]
     public string? FileName { get; set; }

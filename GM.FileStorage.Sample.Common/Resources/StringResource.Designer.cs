@@ -114,20 +114,20 @@ namespace GM.FileStorage.Sample.Common.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Key.
+        ///   Looks up a localized string similar to Storage Key.
         /// </summary>
-        public static string Key {
+        public static string StorageKey {
             get {
-                return ResourceManager.GetString("Key", resourceCulture);
+                return ResourceManager.GetString("StorageKey", resourceCulture);
             }
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Key Prefix.
+        ///   Looks up a localized string similar to Folder.
         /// </summary>
-        public static string KeyPrefix {
+        public static string Folder {
             get {
-                return ResourceManager.GetString("KeyPrefix", resourceCulture);
+                return ResourceManager.GetString("Folder", resourceCulture);
             }
         }
         

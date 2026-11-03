@@ -14,14 +14,14 @@ public class GetFilePresignedUrlQuery : IRequest<FilePresignedUrlDto>
 {
     public static readonly TimeSpan DefaultExpiry = TimeSpan.FromMinutes(10);
 
-    public string? Key { get; set; }
+    public Guid Id { get; set; }
 }
 
 public class GetFilePresignedUrlQueryValidator : AbstractValidator<GetFilePresignedUrlQuery>
 {
     public GetFilePresignedUrlQueryValidator()
     {
-        RuleFor(x => x.Key).NotNull().NotEmpty();
+        RuleFor(x => x.Id).NotEmpty();
     }
 }
 
@@ -31,7 +31,7 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
     public async Task<FilePresignedUrlDto> Handle(GetFilePresignedUrlQuery request, CancellationToken cancellationToken)
     {
         var entity = await unitOfWork.StoredFileRepository
-            .FirstOrDefaultAsync(x => x.Key == request.Key
+            .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && x.IsActive
                                       && !x.IsDeleted
                                       && !x.IsHidden,
@@ -43,8 +43,8 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
         {
             throw new NotFoundException(
                 StringResource.StoredFile,
-                StringResource.Key,
-                request.Key!);
+                StringResource.Id,
+                request.Id);
         }
 
         // The link points at the current version's bytes (the file's storage key), not the logical key.

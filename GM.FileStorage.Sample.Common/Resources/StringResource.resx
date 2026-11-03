@@ -135,11 +135,11 @@
   <data name="IsPublic" xml:space="preserve">
     <value>Is Public</value>
   </data>
-  <data name="Key" xml:space="preserve">
-    <value>Key</value>
+  <data name="StorageKey" xml:space="preserve">
+    <value>Storage Key</value>
   </data>
-  <data name="KeyPrefix" xml:space="preserve">
-    <value>Key Prefix</value>
+  <data name="Folder" xml:space="preserve">
+    <value>Folder</value>
   </data>
   <data name="Metadata" xml:space="preserve">
     <value>Metadata</value>
