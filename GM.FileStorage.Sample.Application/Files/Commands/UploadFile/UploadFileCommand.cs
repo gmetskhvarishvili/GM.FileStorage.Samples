@@ -35,7 +35,7 @@ public class UploadFileCommand : IRequest<UploadedFileDto>
     /// <summary>User the file belongs to; defaults to <c>anon</c>.</summary>
     public string? UserId { get; set; }
 
-    /// <summary>An explicit storage key. Null lets the key strategy generate a tenant/user-scoped one.</summary>
+    /// <summary>An explicit storage key. Null lets the key strategy generate one ({yyyy}/{MM}/{dd}/{guid}{ext}).</summary>
     public string? Key { get; set; }
 }
 
@@ -72,8 +72,8 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // Tenant and user travel as upload metadata: TenantKeyStrategy shapes the key from them, and the catalog
-        // keeps them as searchable rows.
+        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows (they aren't part of the
+        // key, which the key strategy generates as {yyyy}/{MM}/{dd}/{guid}{ext}).
         var metadata = new Dictionary<string, string>
         {
             [StoredFileMetadataNames.TenantId] = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId,

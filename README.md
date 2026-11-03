@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
-a **tenant/user-scoped key strategy** (the KYC pattern), delete and presigned links through the
+date-based keys, delete and presigned links through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
 metadata, so files can be listed by tenant or user, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
@@ -35,7 +35,7 @@ work / domain-event store / actor auditing). The layout mirrors
 | `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, key prefix, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
-| `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure`: GM.FileStorage + the Local/S3/AzureBlob providers, `TenantKeyStrategy`, the database readiness check |
+| `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure`: GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the storage-cleanup job, the database readiness check |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
 | `GM.FileStorage.Sample.API` | GM.API host; `Files/FilesController` sends mediator requests and maps its `*Model`s with Mapster |
 | `tests/GM.FileStorage.Sample.Tests` | End-to-end tests over HTTP (`GmWebApplicationFactory<Program>`) and aggregate guards |
@@ -43,8 +43,8 @@ work / domain-event store / actor auditing). The layout mirrors
 ## What it demonstrates
 
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`
-  (tenant and user travel as upload metadata, which `TenantKeyStrategy` turns into
-  `tenants/{tenantId}/users/{userId}/{guid}{ext}`), then records a `StoredFile` row plus one
+  under a generated key, `{yyyy}/{MM}/{dd}/{guid}{ext}` (GM.FileStorage's default strategy). Tenant and user
+  aren't part of the key: they travel as upload metadata. It then records a `StoredFile` row plus one
   `StoredFileMetadata` row per pair and saves through the unit of work. If the save fails, the uploaded bytes
   are deleted and the error rethrown, so storage never keeps unreferenced objects.
 - **One row per key.** Uploading to an existing key — even a deleted one — calls `StoredFile.Replace`, which
@@ -174,12 +174,12 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 dotnet run --project GM.FileStorage.Sample.API
 
 curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "…", "key": "tenants/acme/users/u1/9f1c…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "…", "key": "2026/11/03/9f1c…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
 curl "http://localhost:5140/api/v1/files?tenantId=acme"
-curl -O "http://localhost:5140/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
-curl -X DELETE "http://localhost:5140/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
-curl -X POST "http://localhost:5140/api/v1/restore/tenants/acme/users/u1/9f1c…a3.pdf"
+curl -O "http://localhost:5140/api/v1/files/2026/11/03/9f1c…a3.pdf"
+curl -X DELETE "http://localhost:5140/api/v1/files/2026/11/03/9f1c…a3.pdf"
+curl -X POST "http://localhost:5140/api/v1/restore/2026/11/03/9f1c…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO

@@ -4,7 +4,6 @@ using GM.FileStorage.Local;
 using GM.FileStorage.S3;
 using GM.DistributedLock;
 using GM.FileStorage.Sample.Infrastructure.Jobs;
-using GM.FileStorage.Sample.Infrastructure.Services;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.HealthChecks.EntityFramework;
 using GM.Scheduling;
@@ -21,14 +20,12 @@ public static class DependencyInjection
         // All three backends are registered; FileStorage:Provider (default "Local") decides which one
         // IFileStorageService resolves to — swapping storage is a config change, not a code change. The S3
         // and Azure clients are only constructed when their provider is selected, so the sample runs on
-        // disk out of the box with no cloud config.
+        // disk out of the box with no cloud config. Keys come from GM.FileStorage's default strategy
+        // ({yyyy}/{MM}/{dd}/{guid}{ext}); tenant and user are kept as searchable metadata, not in the key.
         services.AddGMFileStorage(configuration);
         services.AddGMLocalFileStorage(configuration);
         services.AddGMS3FileStorage(configuration);
         services.AddGMAzureBlobFileStorage(configuration);
-
-        // KYC-style tenant/user-scoped keys (replaces the default date-partitioned strategy).
-        services.AddSingleton<IFileKeyStrategy, TenantKeyStrategy>();
 
         // Encryption at rest, off in appsettings.json (FileStorage:Encryption:Enabled). Turn it on together with the
         // master keys, supplied as secrets (appsecrets.json, SECRETS_PROVIDER, environment): every file is then

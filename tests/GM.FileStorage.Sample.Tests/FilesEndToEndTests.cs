@@ -1,6 +1,7 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
+using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
@@ -38,7 +39,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     public FilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>().WithConfig("FileStorage:Local:RootPath", _root);
 
-    private string KeyPrefix => $"tenants/{_tenantId}/";
+    // Keys don't carry the tenant, so this test's files are the ones tagged with its unique tenant id.
+    private IQueryable<StoredFile> OurFiles(ApplicationDbContext context) =>
+        context.Set<StoredFile>().Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == _tenantId));
 
     public async Task InitializeAsync()
     {
@@ -64,10 +67,11 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             {
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                await context.Set<StoredFileMetadata>()
-                    .Where(x => x.StoredFile.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
-                await context.Set<StoredFile>().Where(x => x.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
-                await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
+                var entryIds = (await OurCleanupEntriesAsync(context)).Select(x => x.Id).ToList();
+                var fileIds = await OurFiles(context).Select(x => x.Id).ToListAsync();
+                await context.Set<StoredFileMetadata>().Where(x => fileIds.Contains(x.StoredFileId)).ExecuteDeleteAsync();
+                await context.Set<StoredFile>().Where(x => fileIds.Contains(x.Id)).ExecuteDeleteAsync();
+                await context.Set<StorageCleanup>().Where(x => entryIds.Contains(x.Id)).ExecuteDeleteAsync();
             }
             catch { /* best-effort cleanup */ }
         }
@@ -83,9 +87,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = _factory.CreateClient();
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: a tenant/user-scoped key, recorded in the catalog.
+        // Upload: a generated date-based key (tenant and user aren't in it), recorded in the catalog.
         var uploaded = await UploadAsync(client, original, "passport.pdf", $"tenantId={_tenantId}&userId=u1");
-        Assert.StartsWith($"tenants/{_tenantId}/users/u1/", uploaded.Key, StringComparison.Ordinal);
+        Assert.Matches(@"^\d{4}/\d{2}/\d{2}/[0-9a-f]{32}\.pdf$", uploaded.Key);
+        Assert.DoesNotContain(_tenantId, uploaded.Key, StringComparison.Ordinal);
         Assert.Equal(original.Length, uploaded.Size);
         Assert.NotEqual(Guid.Empty, uploaded.Id);
 
@@ -97,7 +102,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal("u1", listed.Metadata!["userId"]);
         Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
         Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&userId=someone-else"));
-        Assert.Single(await ListAsync(client, $"keyPrefix={Uri.EscapeDataString(KeyPrefix)}"));
+        var datePrefix = uploaded.Key[..11]; // yyyy/MM/dd/
+        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix={Uri.EscapeDataString(datePrefix)}"));
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&keyPrefix=1999%2F"));
 
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");
@@ -214,7 +221,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var live = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 live"), "live.pdf", $"tenantId={_tenantId}&userId=u1");
 
         // An upload that died after storing its bytes but before recording them: bytes plus a pending entry.
-        var abandonedKey = $"{KeyPrefix}users/u1/abandoned.pdf~{Guid.NewGuid():N}";
+        var abandonedKey = $"{_tenantId}/abandoned.pdf~{Guid.NewGuid():N}";
         using (var scope = _factory.Services.CreateScope())
         {
             var storage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
@@ -239,20 +246,27 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Empty(await CleanupEntriesAsync());
     }
 
-    // The data files under this test's tenant (not the local provider's .gmmeta sidecars).
-    private string[] StoredObjects()
-    {
-        var dir = Path.Combine(_root, KeyPrefix);
-        return Directory.Exists(dir)
-            ? Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith(".gmmeta", StringComparison.Ordinal)).ToArray()
+    // The data files in this test's own storage root (not the local provider's .gmmeta sidecars).
+    private string[] StoredObjects() =>
+        Directory.Exists(_root)
+            ? Directory.GetFiles(_root, "*", SearchOption.AllDirectories).Where(f => !f.EndsWith(".gmmeta", StringComparison.Ordinal)).ToArray()
             : [];
-    }
 
     private async Task<List<StorageCleanup>> CleanupEntriesAsync()
     {
         using var scope = _factory.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        return await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix)).ToListAsync();
+        return await OurCleanupEntriesAsync(scope.ServiceProvider.GetRequiredService<ApplicationDbContext>());
+    }
+
+    // Entries for this test's files: every version is stored as {key}~{version}; hand-made ones start with the
+    // tenant id. Filtered in memory — the table is tiny in tests.
+    private async Task<List<StorageCleanup>> OurCleanupEntriesAsync(ApplicationDbContext context)
+    {
+        var keys = await OurFiles(context).Select(x => x.Key).ToListAsync();
+        return (await context.Set<StorageCleanup>().ToListAsync())
+            .Where(x => x.StorageKey.StartsWith(_tenantId, StringComparison.Ordinal)
+                        || keys.Any(k => x.StorageKey.StartsWith(k + "~", StringComparison.Ordinal)))
+            .ToList();
     }
 
     // Makes this test's queued entries due and runs the job once, as the scheduler would.
@@ -261,7 +275,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using (var scope = _factory.Services.CreateScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(KeyPrefix))
+            var ids = (await OurCleanupEntriesAsync(context)).Select(x => x.Id).ToList();
+            await context.Set<StorageCleanup>().Where(x => ids.Contains(x.Id))
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.DueAtUtc, DateTime.UtcNow.AddSeconds(-1)));
         }
 
@@ -293,7 +308,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         if (!_infraReady) return;
 
         using var client = _factory.CreateClient();
-        var key = $"{KeyPrefix}users/u1/does-not-exist.bin";
+        var key = $"{_tenantId}/does-not-exist.bin";
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{key}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/v1/files/{key}")).StatusCode);

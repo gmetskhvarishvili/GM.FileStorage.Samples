@@ -21,7 +21,7 @@ public class GetFilesListModel : GetBaseListModel
     [Display(ResourceType = typeof(StringResource), Name = "UserId")]
     public string? UserId { get; set; }
 
-    /// <summary>Only files whose storage key starts with this (e.g. <c>tenants/acme/</c>).</summary>
+    /// <summary>Only files whose storage key starts with this (e.g. <c>2026/11/</c> for November 2026).</summary>
     [Display(ResourceType = typeof(StringResource), Name = "KeyPrefix")]
     public string? KeyPrefix { get; set; }
 

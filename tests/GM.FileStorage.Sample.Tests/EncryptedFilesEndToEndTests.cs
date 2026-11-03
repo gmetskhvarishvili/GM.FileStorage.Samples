@@ -1,5 +1,6 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
+using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
 using Microsoft.EntityFrameworkCore;
@@ -38,7 +39,6 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
             .WithConfig("FileStorage:Encryption:ActiveKeyId", "test")
             .WithConfig("FileStorage:Encryption:Keys:test", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
 
-    private string KeyPrefix => $"tenants/{_tenantId}/";
 
     public async Task InitializeAsync()
     {
@@ -63,8 +63,12 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
             {
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                await context.Set<StoredFileMetadata>().Where(x => x.StoredFile.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
-                await context.Set<StoredFile>().Where(x => x.Key.StartsWith(KeyPrefix)).ExecuteDeleteAsync();
+                // Keys don't carry the tenant: this test's rows are the ones tagged with its unique tenant id.
+                var ids = await context.Set<StoredFile>()
+                    .Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == _tenantId))
+                    .Select(f => f.Id).ToListAsync();
+                await context.Set<StoredFileMetadata>().Where(x => ids.Contains(x.StoredFileId)).ExecuteDeleteAsync();
+                await context.Set<StoredFile>().Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
             }
             catch { /* best-effort cleanup */ }
         }
@@ -91,7 +95,7 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         Assert.Equal(original.Length, uploaded.Size); // the plaintext's size, not the ciphertext's
 
         // On disk: ciphertext only.
-        var stored = Directory.GetFiles(Path.Combine(_root, KeyPrefix), "*", SearchOption.AllDirectories)
+        var stored = Directory.GetFiles(_root, "*", SearchOption.AllDirectories)
             .Single(f => !f.EndsWith(".gmmeta", StringComparison.Ordinal));
         var storedBytes = await File.ReadAllBytesAsync(stored);
         Assert.StartsWith("GMFE", Encoding.ASCII.GetString(storedBytes, 0, 4));

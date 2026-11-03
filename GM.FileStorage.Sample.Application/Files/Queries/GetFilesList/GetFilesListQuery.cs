@@ -22,7 +22,7 @@ public class GetFilesListQuery : GetBaseListQuery, IRequest<PagedListDto<StoredF
     /// <summary>Only files uploaded for this user (the <c>userId</c> metadata row).</summary>
     public string? UserId { get; set; }
 
-    /// <summary>Only files whose storage key starts with this, e.g. <c>tenants/acme/</c>.</summary>
+    /// <summary>Only files whose storage key starts with this, e.g. <c>2026/11/</c> for November 2026.</summary>
     public string? KeyPrefix { get; set; }
 
     public string? ContentType { get; set; }

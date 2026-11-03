@@ -33,8 +33,8 @@ public class FilesController : BaseController
     /// Upload File
     /// </summary>
     /// <remarks>
-    /// Multipart <c>file</c>. <c>tenantId</c> and <c>userId</c> shape the storage key via TenantKeyStrategy
-    /// (<c>tenants/{tenantId}/users/{userId}/{guid}{ext}</c>) and are recorded as the file's metadata. Send
+    /// Multipart <c>file</c>, stored under a generated key (<c>{yyyy}/{MM}/{dd}/{guid}{ext}</c>). <c>tenantId</c> and
+    /// <c>userId</c> are recorded as the file's searchable metadata (not part of the key). Send
     /// <c>key</c> to upload to an explicit key instead — uploading to an existing (or deleted) key replaces it.
     /// </remarks>
     /// <param name="file">The file to store</param>
@@ -214,8 +214,8 @@ public class FilesController : BaseController
         return Ok(result);
     }
 
-    // Keys contain slashes (tenants/acme/users/u1/…). A client may send them as-is or URL-encoded — Swagger UI
-    // encodes path parameters, giving tenants%2Facme%2F… — and ASP.NET Core leaves %2F encoded in a {**key} route
+    // Keys contain slashes (2026/11/03/{guid}.pdf). A client may send them as-is or URL-encoded — Swagger UI
+    // encodes path parameters, giving 2026%2F11%2F03%2F… — and ASP.NET Core leaves %2F encoded in a {**key} route
     // value, so decode it here; both forms then find the same file. (Keys come from the key strategy and contain
     // no literal '%'.)
     private static string DecodeKey(string key) => Uri.UnescapeDataString(key);
