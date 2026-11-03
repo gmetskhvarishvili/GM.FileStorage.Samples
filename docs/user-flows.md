@@ -3,7 +3,7 @@
 What a caller can do with a file, and every outcome they can get back. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Replace content](#replace-content--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
 All diagrams: [index](README.md)
 
 ## File lifecycle — state diagram
@@ -15,10 +15,8 @@ title: File lifecycle — state diagram
 stateDiagram-v2
     direction LR
     [*] --> Live: upload (POST /files)
-    Live --> Live: replace content (PUT /files/{id}/content)<br/>same id, new bytes
     Live --> Deleted: delete (DELETE /files/{id})<br/>bytes kept
     Deleted --> Live: restore (POST /files/{id}/restore)
-    Deleted --> Live: replace content<br/>new bytes, restored
 
     state Live {
         direction LR
@@ -32,8 +30,9 @@ stateDiagram-v2
     }
 ```
 
-A file is never removed from the catalog through the API, and its current bytes are never deleted. Only the
-bytes of previous versions and of uploads that were never recorded are deleted, by the worker.
+A file's content never changes after upload: there is no replace, and new content is a new file with a new id.
+A file is never removed from the catalog through the API, and its bytes are never deleted. Only the bytes of
+uploads that were never recorded are deleted, by the worker.
 
 ## Gateway checks — user flow
 
@@ -45,7 +44,7 @@ flowchart TD
     req([Request to :7141]) --> route{Matches a route?}
     route -- no --> nf404[404 Not Found]
     route -- yes --> policy{Which policy?}
-    policy -- POST /files or PUT …/content --> up{Under 30 uploads<br/>this minute for this IP?}
+    policy -- POST /files --> up{Under 30 uploads<br/>this minute for this IP?}
     policy -- other /files routes --> api{Under 300 requests<br/>this minute for this IP?}
     policy -- /swagger/** --> fwd
     up -- no --> r429[429 Too Many Requests<br/>+ Retry-After]
@@ -131,28 +130,6 @@ flowchart TD
 Ranges let video players seek and interrupted downloads resume. With encryption at rest on, the same responses
 come back decrypted.
 
-## Replace content — user flow
-
-```mermaid
----
-title: Replace content — user flow
----
-flowchart TD
-    start([PUT /api/v1/files/id/content<br/>multipart file, tenantId?, userId?]) --> exists{File exists?<br/>deleted counts}
-    exists -- no --> f404[404]
-    exists -- yes --> rules{Upload rules pass?}
-    rules -- no --> r400[400 with the reason<br/>old content untouched]
-    rules -- yes --> race{Another replacement of this<br/>file saved first?}
-    race -- yes --> c400[400 retry the upload<br/>old content untouched]
-    race -- no --> ok[200 same id, new storageKey]
-    ok --> was{Was it deleted?}
-    was -- yes --> restored([Restored with the new content])
-    was -- no --> live([Live with the new content])
-```
-
-Tenant and user stay as they were unless the request gives new ones. The previous version's bytes are deleted
-straight away, or by the worker if that fails.
-
 ## Delete — user flow
 
 ```mermaid
@@ -196,8 +173,7 @@ flowchart TD
     ok --> use([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
 ```
 
-A link points at the current version's bytes. A replacement deletes those bytes straight away, so links handed
-out before it stop working; ask for a new one.
+A file's content never changes, so a link always serves the bytes that were uploaded.
 
 ## Typical session — user journey
 
@@ -213,7 +189,7 @@ journey
       Resume a download with Range: 4: Caller
       Share a time-limited link: 3: Caller
     section Change
-      Replace with a new version: 4: Caller
+      Upload a newer scan as a new file: 4: Caller
       Delete it by mistake: 2: Caller
       Restore it: 5: Caller
 ```

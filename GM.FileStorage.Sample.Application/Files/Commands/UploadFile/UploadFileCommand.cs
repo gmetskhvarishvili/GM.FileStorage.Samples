@@ -1,8 +1,6 @@
 using FluentValidation;
 using GM.Exceptions;
-using GM.EntityFramework.Domain.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
-using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
@@ -11,17 +9,15 @@ using GM.Mediator.Contracts;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 
 /// <summary>
-/// Stores a file through <see cref="IFileStorageService"/> and records it in the catalog: a
-/// <see cref="StoredFile"/> row plus one <see cref="StoredFileMetadata"/> row per metadata pair, so files can be
-/// listed by tenant or user. Without <see cref="Id"/> it's a new file, identified by a new GUID; with one, it
-/// replaces that file's content (restoring it if it was deleted).
+/// Stores a new file through <see cref="IFileStorageService"/> and records it in the catalog: a
+/// <see cref="StoredFile"/> row, identified by a new GUID, plus one <see cref="StoredFileMetadata"/> row per metadata
+/// pair, so files can be listed by tenant or user. A stored file's content never changes; new content is a new file.
 /// </summary>
 public class UploadFileCommand : IRequest<UploadedFileDto>
 {
@@ -35,9 +31,6 @@ public class UploadFileCommand : IRequest<UploadedFileDto>
 
     /// <summary>User the file belongs to; defaults to <c>anon</c>.</summary>
     public string? UserId { get; set; }
-
-    /// <summary>The file whose content this replaces; null uploads a new file.</summary>
-    public Guid? Id { get; set; }
 }
 
 public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
@@ -49,14 +42,12 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
         RuleFor(x => x.ContentType).NotNull().NotEmpty().MaximumLength(StoredFile.ContentTypeMaxLength);
         RuleFor(x => x.TenantId).MaximumLength(StoredFileMetadata.ValueMaxLength);
         RuleFor(x => x.UserId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-        RuleFor(x => x.Id).NotEqual(Guid.Empty);
     }
 }
 
 /// <remarks>
-/// A file has one identifier, a GUID (its id, which is also its key). Where its bytes live is separate: every
-/// upload gets a fresh storage key from FileStorage:KeyTemplate (e.g. <c>documents/9f/9f1c….pdf</c>), so a
-/// replacement never overwrites content the catalog still points at.
+/// A file has one identifier, a GUID (its id, which is also its key). Where its bytes live is separate: a storage key
+/// from FileStorage:KeyTemplate (e.g. <c>documents/9f/9f1c….pdf</c>).
 /// <para>
 /// Storage and the catalog can't share a transaction, so the handler orders its steps so that every failure
 /// leaves at worst unreferenced bytes, and those are always queued for deletion (<see cref="StorageCleanup"/>):
@@ -64,42 +55,23 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// <list type="number">
 /// <item>Queue the new storage key for cleanup (due after a grace period) and save — before any bytes exist.</item>
 /// <item>Upload under that key.</item>
-/// <item>In one transaction: create the file row or point it at the new key, sync its metadata, drop the pending
-/// entry, and queue the previous version's key. If this fails, nothing the catalog points at changed; the new
-/// bytes are deleted (or left to the job).</item>
-/// <item>Delete the previous version's bytes; a failure leaves them queued for the job.</item>
+/// <item>In one transaction: create the file row and its metadata rows, and drop the pending entry. If this fails,
+/// the new bytes are deleted (or left to the job).</item>
 /// </list>
-/// Two uploads replacing the same file at once can't both win: the row's storage key is a concurrency token, so
-/// the loser's save fails and it gets a 400 asking it to retry.
 /// </remarks>
 public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // A replacement targets an existing file (deleted or not), checked before any bytes are stored. Tracked, so
-        // the save checks the row still has the storage key read here (its concurrency token).
-        StoredFile? existing = null;
-        var current = new Dictionary<string, string>();
-        if (request.Id is { } id)
-        {
-            existing = await unitOfWork.StoredFileRepository
-                .FirstOrDefaultAsync(x => x.Id == id, false, null, cancellationToken)
-                ?? throw new NotFoundException(StringResource.StoredFile, StringResource.Id, id);
-            current = (await unitOfWork.StoredFileMetadataRepository
-                    .FindAsync(x => x.StoredFileId == id && !x.IsDeleted, true, null, cancellationToken))
-                .ToDictionary(x => x.Name, x => x.Value);
-        }
-
-        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows. A replacement keeps the
-        // file's tenant and user unless new ones are given; a new file without them gets "public" / "anon".
+        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows.
         var metadata = new Dictionary<string, string>
         {
-            [StoredFileMetadataNames.TenantId] = Pick(request.TenantId, current, StoredFileMetadataNames.TenantId, "public"),
-            [StoredFileMetadataNames.UserId] = Pick(request.UserId, current, StoredFileMetadataNames.UserId, "anon"),
+            [StoredFileMetadataNames.TenantId] = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId,
+            [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
         };
 
-        // Where these bytes go: a fresh path from FileStorage:KeyTemplate. It's needed before the upload (it's queued
+        // Where these bytes go: a path from FileStorage:KeyTemplate. It's needed before the upload (it's queued
         // first), so it's built from the declared content type; with FileStorage:VerifyContentType on, a declaration
         // the bytes don't match is rejected by the upload, so the {category} folder can't lie.
         var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType });
@@ -132,30 +104,18 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
 
         // 3. Record it, in one transaction.
         StoredFile entity;
-        StorageCleanup? previousVersion = null;
         try
         {
-            var uploadedAtUtc = stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow;
-            var isPublic = stored.Visibility == FileVisibility.Public;
+            entity = StoredFile.Create(Guid.NewGuid(), storageKey, stored.FileName, stored.ContentType, stored.Size,
+                stored.Checksum, stored.Visibility == FileVisibility.Public,
+                stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow);
+            await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
 
-            if (existing == null)
+            foreach (var (name, value) in metadata)
             {
-                entity = StoredFile.Create(Guid.NewGuid(), storageKey, stored.FileName, stored.ContentType, stored.Size,
-                    stored.Checksum, isPublic, uploadedAtUtc);
-                await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
+                await unitOfWork.StoredFileMetadataRepository.AddAsync(
+                    StoredFileMetadata.Create(entity.Id, name, value), cancellationToken);
             }
-            else
-            {
-                // New content for the same file (restores it if it had been deleted); the old bytes stay put until
-                // this is saved, then go.
-                entity = existing;
-                var previousStorageKey = entity.Replace(storageKey, stored.FileName, stored.ContentType, stored.Size,
-                    stored.Checksum, isPublic, uploadedAtUtc);
-                previousVersion = StorageCleanup.Create(previousStorageKey, DateTime.UtcNow);
-                await unitOfWork.StorageCleanupRepository.AddAsync(previousVersion, cancellationToken);
-            }
-
-            await SyncMetadataAsync(entity.Id, metadata, cancellationToken);
 
             // The bytes are referenced now, so they're no longer the pending upload's to clean up. If the job has
             // already claimed the entry (an upload slower than the grace period), this save fails instead.
@@ -163,29 +123,17 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
 
             await unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            // Not recorded: the catalog still points at whatever it did before, and our bytes are unreferenced.
-            // Delete them now; the pending entry is still queued, so the job retries if this fails.
+            // Not recorded: our bytes are unreferenced. Delete them now; the pending entry is still queued, so the
+            // job retries if this fails.
             try { await storage.DeleteAsync(storageKey, CancellationToken.None); }
 #pragma warning disable CA1031 // Best effort: the queued entry covers it.
             catch (Exception) { }
 #pragma warning restore CA1031
 
-            // A lost race: the save failed on the row's storage key (GM's unit of work reports that as a
-            // ConcurrencyException) because another replacement of the same file finished first.
-            if (ex is ConcurrencyException && existing != null)
-            {
-                throw new BadRequestException(
-                    $"Another upload to file '{existing.Id}' finished first, so this one wasn't saved. Retry the upload.");
-            }
-
             throw;
         }
-
-        // 4. The previous version is unreferenced now; delete it (a failure leaves it queued for the job).
-        if (previousVersion != null)
-            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, previousVersion, CancellationToken.None);
 
         return new UploadedFileDto
         {
@@ -196,43 +144,6 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             Size = entity.Size,
             Checksum = entity.Checksum,
         };
-    }
-
-    private static string Pick(string? given, Dictionary<string, string> current, string name, string fallback) =>
-        !string.IsNullOrWhiteSpace(given) ? given
-        : current.TryGetValue(name, out var existing) ? existing
-        : fallback;
-
-    // Makes the file's metadata rows match the upload: changes or restores the rows that exist (a name is unique
-    // per file, deleted or not), adds the new names, and soft-removes the names the upload no longer carries.
-    private async Task SyncMetadataAsync(
-        Guid storedFileId, Dictionary<string, string> metadata, CancellationToken cancellationToken)
-    {
-        var existing = await unitOfWork.StoredFileMetadataRepository
-            .FindAsync(x => x.StoredFileId == storedFileId, true, null, cancellationToken);
-
-        foreach (var (name, value) in metadata)
-        {
-            var row = existing.FirstOrDefault(x => x.Name == name);
-            if (row == null)
-            {
-                await unitOfWork.StoredFileMetadataRepository.AddAsync(
-                    StoredFileMetadata.Create(storedFileId, name, value), cancellationToken);
-                continue;
-            }
-
-            if (row.IsDeleted)
-                row.RestoreAll();
-
-            row.ChangeValue(value);
-            unitOfWork.StoredFileMetadataRepository.Update(row);
-        }
-
-        foreach (var row in existing.Where(x => !x.IsDeleted && !metadata.ContainsKey(x.Name)))
-        {
-            row.SoftRemove();
-            unitOfWork.StoredFileMetadataRepository.Update(row);
-        }
     }
 }
 

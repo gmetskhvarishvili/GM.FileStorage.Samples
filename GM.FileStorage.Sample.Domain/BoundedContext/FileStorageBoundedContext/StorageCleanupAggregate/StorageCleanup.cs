@@ -6,15 +6,11 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 
 /// <summary>
 /// A storage object that must be deleted once <see cref="DueAtUtc"/> passes, unless a stored file (live or deleted)
-/// still points at it. Written in the same transaction as the change that may orphan the bytes, so a crash or a
-/// failed delete never leaves them behind for good:
-/// <list type="bullet">
-/// <item>before an upload, for its new storage key, due after <see cref="PendingUploadGracePeriod"/> (removed again
-/// when the upload is recorded);</item>
-/// <item>when a replacement is recorded, for the previous version's storage key, due now.</item>
-/// </list>
+/// still points at it. Queued before an upload, for its new storage key, due after
+/// <see cref="PendingUploadGracePeriod"/>, and removed again in the transaction that records the upload. So an upload
+/// that crashes or fails after storing its bytes never leaves them behind for good: the storage-cleanup job deletes
+/// them once the entry falls due.
 /// Deleting a file queues nothing: it only marks the row deleted and keeps the bytes, so it can be restored.
-/// The request deletes the bytes itself straight after saving; the storage-cleanup job retries whatever is left.
 /// </summary>
 public class StorageCleanup : Entity<Guid>, IAggregateRoot
 {

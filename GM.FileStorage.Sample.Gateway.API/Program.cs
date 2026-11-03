@@ -19,7 +19,7 @@ builder.Services.AddGMDistributedLock();
 
 // ---------------------------------------------------------------------------------------------
 // YARP reverse proxy + GM rate limiting, both from configuration (see appsettings.json): every route
-// forwards to the files API; uploads/replacements get a tighter limit than reads. Bodies are streamed
+// forwards to the files API; uploads get a tighter limit than reads. Bodies are streamed
 // through, never buffered, so large uploads and ranged downloads (206) pass untouched.
 // ---------------------------------------------------------------------------------------------
 builder.Services.AddGMGateway(

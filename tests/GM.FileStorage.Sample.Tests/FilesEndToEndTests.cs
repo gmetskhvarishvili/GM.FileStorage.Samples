@@ -25,8 +25,8 @@ namespace GM.FileStorage.Sample.Tests;
 
 /// <summary>
 /// End-to-end proof of the file catalog over HTTP: an upload gets a GUID and a visible storage location, is listed by
-/// tenant and readable by id, downloads byte-for-byte, can be deleted (bytes kept), restored and replaced. Runs against
-/// a throwaway local storage root, with a key template prefixed by this test's tenant id so its stored objects and
+/// tenant and readable by id, downloads byte-for-byte, can be deleted (bytes kept) and restored, and its content can't
+/// be replaced. Runs against a throwaway local storage root, with a key template prefixed by this test's tenant id so its stored objects and
 /// cleanup entries are easy to tell apart. Requires Postgres (ConnectionStrings:ApplicationDatabase); no-ops if it
 /// isn't reachable.
 /// </summary>
@@ -83,7 +83,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Upload_list_details_download_delete_restore_and_replace()
+    public async Task Upload_list_details_download_delete_and_restore()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
@@ -139,19 +139,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
 
-        // Replace a deleted file's content: same id, restored, new content and metadata, new storage location.
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
-        var replacement = Encoding.UTF8.GetBytes("%PDF-1.7 a newer passport scan");
-        var replaced = await ReplaceAsync(client, uploaded.Id, replacement, "passport-v2.pdf", "userId=u2");
-        Assert.Equal(uploaded.Id, replaced.Id);
-        Assert.NotEqual(uploaded.StorageKey, replaced.StorageKey);
-
-        var restored = Assert.Single(await ListAsync(client, $"tenantId={_tenantId}"));
-        Assert.Equal((uploaded.Id, false, "passport-v2.pdf", "u2"), (restored.Id, restored.IsDeleted, restored.FileName, restored.Metadata!["userId"]));
-        Assert.Equal(replacement, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
-
-        // The old version's bytes are gone: only the new location is stored. Still one row, one metadata row per name.
-        Assert.Equal(Path.GetFullPath(Path.Combine(_root, await StoragePathAsync(replaced.Id))), Path.GetFullPath(Assert.Single(StoredObjects())), ignoreCase: true);
+        // Still one row, one metadata row per name, one stored object, and nothing queued.
+        Assert.Single(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Id == uploaded.Id));
@@ -159,44 +149,22 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Replacing_content_without_tenant_or_user_keeps_them()
+    public async Task A_files_content_cannot_be_replaced()
     {
         if (!_infraReady) return;
 
         using var client = _factory.CreateClient();
-        var uploaded = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 v1"), "a.pdf", "userId=u1");
+        var original = Encoding.UTF8.GetBytes("%PDF-1.7 original");
+        var uploaded = await UploadAsync(client, original, "a.pdf", "userId=u1");
 
-        // No tenantId/userId on the replace: the file stays where it was, not under "public"/"anon".
-        var response = await SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{uploaded.Id}/content",
-            Encoding.UTF8.GetBytes("%PDF-1.7 v2"), "a.pdf", "application/pdf");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // There is no replace endpoint: PUT on the content is refused and nothing is stored.
+        var put = await SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{uploaded.Id}/content",
+            Encoding.UTF8.GetBytes("%PDF-1.7 other"), "a.pdf", "application/pdf");
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, put.StatusCode);
 
-        var listed = Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
-        Assert.Equal(uploaded.Id, listed.Id);
-    }
-
-    [Fact]
-    public async Task Racing_replacements_leave_one_consistent_version()
-    {
-        if (!_infraReady) return;
-
-        using var client = _factory.CreateClient();
-        var original = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 original"), "a.pdf", "userId=u1");
-
-        var bodies = Enumerable.Range(0, 6).Select(i => $"%PDF-1.7 racer {i}").ToArray();
-        var responses = await Task.WhenAll(bodies.Select(body =>
-            SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{original.Id}/content", Encoding.UTF8.GetBytes(body), "a.pdf", "application/pdf")));
-
-        // Every racer either won (200) or was told to retry (400); none corrupted the file.
-        Assert.All(responses, r => Assert.Contains(r.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.BadRequest }));
-        Assert.Contains(responses, r => r.StatusCode == HttpStatusCode.OK);
-        var current = await client.GetStringAsync($"/api/v1/files/{original.Id}/content");
-        Assert.Contains(current, bodies);
-
-        // Whatever a loser left behind is queued; once the job runs, only the current version's bytes remain.
-        await RunCleanupJobAsync();
+        Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
         Assert.Single(StoredObjects());
-        Assert.Equal(current, await client.GetStringAsync($"/api/v1/files/{original.Id}/content"));
+        Assert.Empty(await CleanupEntriesAsync());
     }
 
     [Fact]
@@ -245,12 +213,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{id}/presign")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/v1/files/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{id}/restore", null)).StatusCode);
-
-        // Replacing an unknown file is refused before any bytes are stored.
-        var replace = await SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{id}/content",
-            Encoding.UTF8.GetBytes("%PDF-1.7 x"), "x.pdf", "application/pdf");
-        Assert.Equal(HttpStatusCode.NotFound, replace.StatusCode);
-        Assert.Empty(StoredObjects());
     }
 
     [Fact]
@@ -347,9 +309,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     private Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName, string query) =>
         ExpectOkAsync(SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}&{query}", bytes, fileName, "application/pdf"));
-
-    private Task<UploadResponse> ReplaceAsync(HttpClient client, Guid id, byte[] bytes, string fileName, string query) =>
-        ExpectOkAsync(SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{id}/content?tenantId={_tenantId}&{query}", bytes, fileName, "application/pdf"));
 
     private static async Task<UploadResponse> ExpectOkAsync(Task<HttpResponseMessage> send)
     {

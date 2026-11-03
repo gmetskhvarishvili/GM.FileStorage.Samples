@@ -11,8 +11,8 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.Infrastructure.Jobs;
 
 /// <summary>
-/// Deletes the storage objects nothing points at any more — abandoned uploads and replaced versions whose
-/// immediate delete failed (see <c>StorageCleanup</c>). A deleted file keeps its bytes (it can be restored), so
+/// Deletes the storage objects nothing points at — the bytes of uploads that were stored but never recorded
+/// (see <c>StorageCleanup</c>). A deleted file keeps its bytes (it can be restored), so
 /// they are never queued. Each due entry is carried out in its own DI scope, so one failure doesn't affect the rest;
 /// a failed entry backs off and is retried on a later run. An entry whose storage key any file row still uses is
 /// dropped without deleting anything. Runs every minute, guarded by a distributed lock (by GM.Scheduling), so only

@@ -11,7 +11,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- | --- | --- |
 | Gateway | every request | [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) |
 | Upload | `POST /api/v1/files` | [Upload — user flow](user-flows.md#upload--user-flow) | [Upload — sequence](sequence-diagrams.md#upload--sequence) |
-| Replace content | `PUT /api/v1/files/{id}/content` | [Replace content — user flow](user-flows.md#replace-content--user-flow) | [Replace content — sequence](sequence-diagrams.md#replace-content--sequence) |
 | List | `GET /api/v1/files` | [List — user flow](user-flows.md#list--user-flow) | [List — sequence](sequence-diagrams.md#list--sequence) |
 | Details | `GET /api/v1/files/{id}` | [Details — user flow](user-flows.md#details--user-flow) | [Details — sequence](sequence-diagrams.md#details--sequence) |
 | Download | `GET /api/v1/files/{id}/content` | [Download — user flow](user-flows.md#download--user-flow) | [Download — sequence](sequence-diagrams.md#download--sequence) |
@@ -44,13 +43,12 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 
 | Diagram | Shows |
 | --- | --- |
-| [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, replaced, deleted, restored |
+| [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, deleted, restored; content never changes |
 | [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | Route match, rate limits, 429 / 502 |
 | [Upload — user flow](user-flows.md#upload--user-flow) | Validation, upload rules, 200 / 400 |
 | [List — user flow](user-flows.md#list--user-flow) | Filters and paging |
 | [Details — user flow](user-flows.md#details--user-flow) | Visible or deleted file, 200 / 404 |
 | [Download — user flow](user-flows.md#download--user-flow) | Whole file or a range, 200 / 206 / 404 / 416 |
-| [Replace content — user flow](user-flows.md#replace-content--user-flow) | New content, lost race, restoring a deleted file |
 | [Delete — user flow](user-flows.md#delete--user-flow) | Soft delete, 204 / 404 |
 | [Restore — user flow](user-flows.md#restore--user-flow) | Bytes still there, 204 / 404 |
 | [Presign — user flow](user-flows.md#presign--user-flow) | When a direct link is possible, 200 / 400 / 404 |
@@ -63,7 +61,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Startup — sequence](sequence-diagrams.md#startup--sequence) | Secrets, migrations, job scheduling, the gateway's routes |
 | [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) | Rate-limit check, forwarding, 429 / 502 |
 | [Upload — sequence](sequence-diagrams.md#upload--sequence) | Queue, upload, one transaction, failures |
-| [Replace content — sequence](sequence-diagrams.md#replace-content--sequence) | New version, concurrency token, deleting the old version |
 | [List — sequence](sequence-diagrams.md#list--sequence) | Specification, count, page, mapping |
 | [Details — sequence](sequence-diagrams.md#details--sequence) | Visibility filter |
 | [Download — sequence](sequence-diagrams.md#download--sequence) | Ranges, missing bytes, 206 / 416 |

@@ -180,7 +180,6 @@ classDiagram
 
     class FilesController {
         +UploadFile()
-        +ReplaceFileContent()
         +GetFilesList()
         +GetFileDetails()
         +DownloadFile()
@@ -261,7 +260,6 @@ classDiagram
         +long Size
         +string Checksum
         +bool IsPublic
-        +Replace() previous storage key
         +SoftRemove()
         +RestoreAll()
     }

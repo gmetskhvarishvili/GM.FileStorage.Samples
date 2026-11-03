@@ -11,8 +11,7 @@ namespace GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
 
 /// <summary>
 /// Deletes a file from the catalog only: its row is soft-removed (hidden from list, details, download and presign)
-/// and its bytes stay in storage, so <c>RestoreFileCommand</c> can bring it back exactly as it was. Replacing its
-/// content (an upload with its id) also brings it back, with the new content.
+/// and its bytes stay in storage, so <c>RestoreFileCommand</c> can bring it back exactly as it was.
 /// </summary>
 public class DeleteFileCommand : IRequest
 {

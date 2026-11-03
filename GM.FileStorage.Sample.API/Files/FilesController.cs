@@ -20,7 +20,8 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
-/// Files Controller — upload, list, inspect, download, replace, delete, restore and presign files. A file is
+/// Files Controller — upload, list, inspect, download, delete, restore and presign files. A file's content never
+/// changes after upload; new content is a new file. A file is
 /// identified by one GUID (its id); its bytes are stored under folders laid out by <c>FileStorage:KeyTemplate</c>,
 /// and responses show the stored object's name as <c>storageKey</c> (e.g. <c>9f1c….pdf</c>). The bytes live in the storage provider
 /// behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus its
@@ -46,34 +47,23 @@ public class FilesController : BaseController
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
-    public Task<IActionResult> UploadFile(
+    public async Task<IActionResult> UploadFile(
         IFormFile file,
         [FromQuery] UploadFileModel request,
-        CancellationToken cancellationToken) =>
-        UploadAsync(null, file, request, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        // Streamed from the request straight into storage; never buffered whole.
+        await using var stream = file.OpenReadStream();
 
-    /// <summary>
-    /// Replace File Content
-    /// </summary>
-    /// <remarks>
-    /// Multipart <c>file</c>: new content for an existing file (a deleted one is restored). The id stays the same;
-    /// the bytes get a new <c>storageKey</c> and the previous version is removed.
-    /// </remarks>
-    /// <param name="id">The file to replace</param>
-    /// <param name="file">The new content</param>
-    /// <param name="request">Tenant and user (query string)</param>
-    /// <param name="cancellationToken"></param>
-    /// <returns>The file's id, new storage key, size, checksum and content type</returns>
-    [HttpPut("files/{id:guid}/content", Name = nameof(ReplaceFileContent))]
-    [Consumes("multipart/form-data")]
-    [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
-    public Task<IActionResult> ReplaceFileContent(
-        [FromRoute] Guid id,
-        IFormFile file,
-        [FromQuery] UploadFileModel request,
-        CancellationToken cancellationToken) =>
-        UploadAsync(id, file, request, cancellationToken);
+        var command = request.Adapt<UploadFileCommand>();
+        command.Content = stream;
+        command.FileName = file.FileName;
+        command.ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
+
+        var response = await Mediator.Send(command, cancellationToken);
+        var result = response.Adapt<UploadedFileModel>();
+        return Ok(result);
+    }
 
     /// <summary>
     /// Get Files List
@@ -224,24 +214,6 @@ public class FilesController : BaseController
     {
         var response = await Mediator.Send(new GetFilePresignedUrlQuery { Id = id }, cancellationToken);
         var result = response.Adapt<PresignedUrlModel>();
-        return Ok(result);
-    }
-
-    // Upload and replace share this: null id uploads a new file, otherwise it replaces that file's content.
-    private async Task<IActionResult> UploadAsync(
-        Guid? id, IFormFile file, UploadFileModel request, CancellationToken cancellationToken)
-    {
-        // Streamed from the request straight into storage; never buffered whole.
-        await using var stream = file.OpenReadStream();
-
-        var command = request.Adapt<UploadFileCommand>();
-        command.Id = id;
-        command.Content = stream;
-        command.FileName = file.FileName;
-        command.ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType;
-
-        var response = await Mediator.Send(command, cancellationToken);
-        var result = response.Adapt<UploadedFileModel>();
         return Ok(result);
     }
 }

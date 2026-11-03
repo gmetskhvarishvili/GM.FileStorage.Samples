@@ -11,8 +11,7 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 /// and exposes the factory, mirroring how the other GM samples specialise their library bases.
 /// A file has one identifier: its <see cref="GMStoredFile{TStoredFile,TStoredFileMetadata}.Key"/> is its id, a
 /// plain GUID. Where the bytes live is separate — the <c>StorageKey</c>, a folder path from the key template
-/// (e.g. <c>documents/9f/9f1c….pdf</c>), new for every upload so a replacement never overwrites content the
-/// catalog still points at.
+/// (e.g. <c>documents/9f/9f1c….pdf</c>). A file's content never changes after upload.
 /// </summary>
 public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggregateRoot
 {

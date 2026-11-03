@@ -34,7 +34,7 @@ public static class DependencyInjection
 
     /// <summary>
     /// The worker: file storage plus the scheduled <see cref="StorageCleanupJob"/>, which deletes whatever bytes
-    /// uploads leave unreferenced (crashes, failed deletes, replaced versions). It only deletes objects, so it needs
+    /// uploads leave unreferenced (crashes and failures between storing the bytes and recording them). It only deletes objects, so it needs
     /// no encryption keys. It must see the same storage as the API (same FileStorage settings and root).
     /// </summary>
     public static IServiceCollection AddWorkerInfrastructure(

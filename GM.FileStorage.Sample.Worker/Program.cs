@@ -4,7 +4,7 @@ using GM.Secrets;
 using Microsoft.Extensions.Hosting;
 
 // The background side of the sample: runs StorageCleanupJob (GM.Scheduling, every minute), which deletes the bytes
-// uploads leave unreferenced — abandoned uploads and replaced versions whose immediate delete failed. The API only
+// uploads leave unreferenced (stored but never recorded, e.g. after a crash). The API only
 // serves requests; the database migrations are applied by the API at startup.
 var builder = Host.CreateApplicationBuilder(args);
 

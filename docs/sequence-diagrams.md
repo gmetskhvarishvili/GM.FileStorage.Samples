@@ -17,7 +17,7 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Replace content](#replace-content--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -129,52 +129,6 @@ sequenceDiagram
 
 If the API crashes between the upload and the commit, the bytes exist but nothing points at them. The queued
 entry falls due 15 minutes later and the worker deletes them.
-
-## Replace content — sequence
-
-`PUT /api/v1/files/{id}/content`
-
-```mermaid
----
-title: Replace content — sequence
----
-sequenceDiagram
-    autonumber
-    participant API
-    participant DB
-    participant S as Storage
-
-    API->>DB: load the file (deleted too), tracked
-    alt not found
-        API-->>API: 404
-    end
-    API->>DB: load its metadata (current tenant and user)
-    API->>API: tenant/user = given ones, else current ones
-    API->>API: a fresh storage key for the new version
-    API->>DB: insert storage_cleanups (new key, due in 15 min)
-    API->>S: UploadAsync (rules checked as for an upload)
-    API->>DB: BEGIN
-    API->>DB: update stored_files set storage_key = new<br/>where storage_key = the one read (concurrency token)
-    API->>DB: sync metadata rows (change, restore, add, soft-remove)
-    API->>DB: delete the pending entry
-    API->>DB: insert storage_cleanups (old key, due now)
-    API->>DB: COMMIT
-    alt another replacement committed first
-        DB-->>API: 0 rows → ConcurrencyException
-        API->>S: delete the new bytes
-        API-->>API: 400 "Another upload … finished first. Retry."
-    else committed
-        API->>S: delete the old version
-        alt deleted
-            API->>DB: delete its entry
-        else failed
-            Note over API,DB: stays queued for the worker
-        end
-        API-->>API: 200 { same id, new storageKey }
-    end
-```
-
-A replacement never overwrites bytes the catalog still points at, and replacing a deleted file restores it.
 
 ## List — sequence
 

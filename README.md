@@ -76,15 +76,14 @@ flowchart LR
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
   storage never keeps unreferenced objects.
-- **Replace content.** `PUT /files/{id}/content` calls `StoredFile.Replace`: same id, new storage
-  location. It restores a deleted file and syncs the metadata rows (changed, restored, added or
-  soft-removed).
+- **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
+  New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
   and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
 - **Searchable metadata.** The list filters by tenant/user with `Metadata.Any(...)` sub-queries served by the
   `(name, value)` index, plus storage folder and content type, with GM.API paging (`X-Pagination` header).
-- **Domain events.** `GMStoredFileUploaded/Replaced/Deleted/RestoredDomainEvent`s are written to
+- **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
   active, so switching disk → S3 → Azure is a **config change, not a code change**. The cloud clients are
@@ -103,8 +102,7 @@ A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are 
 ```
 
 Responses show only the stored object's name as `storageKey` (`9f1cb2…a3.pdf`); the folders are an internal
-layout detail. Every upload gets a fresh storage key, so replacing a file never overwrites the version
-the catalog still points at.
+layout detail.
 
 - **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
   from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
@@ -132,22 +130,16 @@ The bytes (in `IFileStorageService`) and the catalog row (in Postgres) can't sha
 sample orders its steps so that any failure leaves at worst bytes nothing points at, and those are
 always queued for deletion in the `storage_cleanups` table.
 
-- **A fresh storage key per upload.** Every upload is stored at its own path from the key template,
-  recorded as `StoredFile.StorageKey`. A replacement never overwrites bytes the catalog still points at.
 - **Upload** ([UploadFileCommand](GM.FileStorage.Sample.Application/Files/Commands/UploadFile/UploadFileCommand.cs)):
   1. Queue the new storage key for cleanup, due in 15 minutes, before any bytes exist.
   2. Upload the bytes.
-  3. In one transaction: create the row or point it at the new storage key, sync its metadata, drop the
-     queued entry, and queue the previous version's storage key.
-  4. Delete the previous version.
+  3. In one transaction: create the row and its metadata rows, and drop the queued entry.
 
   | If this happens… | …the result |
   | --- | --- |
   | A crash after step 2 | The bytes are unreferenced and queued; the job deletes them. |
-  | Step 3 fails | The row is unchanged, and the new bytes are deleted (or left queued). |
-  | Step 4 fails | The old version stays queued. |
-- **Racing replacements of one file.** `StorageKey` is a concurrency token, so one upload wins and
-  the others get a 400 asking them to retry. Their bytes are cleaned up.
+  | Step 3 fails | No row is created, and the new bytes are deleted (or left queued). |
+- **Content never changes**, so stored bytes are never overwritten or swapped out from under a row.
 - **Delete** only marks the row deleted and keeps its bytes, so nothing is queued and a restore is instant.
 - **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute, in the
   worker):
@@ -192,14 +184,13 @@ because a direct link would serve ciphertext.
 | `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
-| `PUT` | `/api/v1/files/{id}/content?tenantId=&userId=` | Replace the content (multipart `file`); same id, new storage key; restores a deleted file |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/api/v1/files/{id}/presign` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
-Through the gateway, the same routes are on `https://localhost:7141`. Uploads and replacements are limited to
+Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
 30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
 
 ## Database setup
@@ -264,7 +255,6 @@ curl -F "file=@passport.pdf" "https://localhost:7141/api/v1/files?tenantId=acme&
 
 curl "https://localhost:7141/api/v1/files?tenantId=acme"
 curl -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
-curl -X PUT -F "file=@passport-v2.pdf" "https://localhost:7141/api/v1/files/6f1e…/content"
 curl -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
 curl -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
 ```
@@ -289,7 +279,8 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
-download → presign → delete (row marked deleted, bytes kept) → restore → replace the content. They
+download → presign → delete (row marked deleted, bytes kept) → restore, and check that `PUT` on a file's
+content is refused (405). They
 need PostgreSQL and **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

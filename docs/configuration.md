@@ -62,7 +62,6 @@ Routes are matched in order of specificity; each names a rate-limit policy and t
 | Route | Match | Policy |
 | --- | --- | --- |
 | `files-upload` | `POST /api/{version}/files` | `uploads` |
-| `files-replace` | `PUT /api/{version}/files/{id}/content` | `uploads` |
 | `files` | `/api/{version}/files/{**catch-all}` | `api` |
 | `files-api-docs` | `GET /swagger/{**catch-all}` | none |
 
