@@ -173,13 +173,13 @@ dotnet ef migrations add <Name> -p GM.FileStorage.Sample.Persistence -s GM.FileS
 ```bash
 dotnet run --project GM.FileStorage.Sample.API
 
-curl -F "file=@passport.pdf" "http://localhost:5xxx/api/v1/files?tenantId=acme&userId=u1"
+curl -F "file=@passport.pdf" "http://localhost:5140/api/v1/files?tenantId=acme&userId=u1"
 # { "id": "…", "key": "tenants/acme/users/u1/9f1c…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
-curl "http://localhost:5xxx/api/v1/files?tenantId=acme"
-curl -O "http://localhost:5xxx/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
-curl -X DELETE "http://localhost:5xxx/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
-curl -X POST "http://localhost:5xxx/api/v1/restore/tenants/acme/users/u1/9f1c…a3.pdf"
+curl "http://localhost:5140/api/v1/files?tenantId=acme"
+curl -O "http://localhost:5140/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
+curl -X DELETE "http://localhost:5140/api/v1/files/tenants/acme/users/u1/9f1c…a3.pdf"
+curl -X POST "http://localhost:5140/api/v1/restore/tenants/acme/users/u1/9f1c…a3.pdf"
 ```
 
 Files land under `FileStorage:Local:RootPath` (default `App_Data/file-storage`, gitignored). To run on S3/MinIO
