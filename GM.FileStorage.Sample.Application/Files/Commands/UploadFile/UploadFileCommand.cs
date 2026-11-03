@@ -186,7 +186,6 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         {
             Id = entity.Id,
             StorageKey = StorageKeys.Name(entity.StorageKey),
-            Folder = StorageKeys.Folder(entity.StorageKey),
             FileName = entity.FileName,
             ContentType = entity.ContentType,
             Size = entity.Size,
@@ -235,9 +234,6 @@ public class UploadedFileDto
 
     /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
     public string? StorageKey { get; set; }
-
-    /// <summary>The folder it's stored in, e.g. <c>documents/9f/</c>.</summary>
-    public string? Folder { get; set; }
 
     public string? FileName { get; set; }
     public string? ContentType { get; set; }

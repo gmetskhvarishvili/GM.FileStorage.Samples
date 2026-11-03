@@ -58,9 +58,6 @@ public class StoredFileDto : AuditableDto
     public Guid Id { get; set; }
     /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
     public string? StorageKey { get; set; }
-
-    /// <summary>The folder it's stored in, e.g. <c>documents/9f/</c>.</summary>
-    public string? Folder { get; set; }
     public string? FileName { get; set; }
     public string? ContentType { get; set; }
     public long Size { get; set; }

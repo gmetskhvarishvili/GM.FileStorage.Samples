@@ -13,9 +13,6 @@ public class UploadedFileModel
     /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "StorageKey")]
     public string? StorageKey { get; set; }
-    /// <summary>The folder it's stored in, e.g. <c>documents/9f/</c>.</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "Folder")]
-    public string? Folder { get; set; }
     /// <summary>The original file name.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "FileName")]
     public string? FileName { get; set; }
