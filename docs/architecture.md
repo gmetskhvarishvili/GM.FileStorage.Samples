@@ -5,7 +5,7 @@ The sample runs as three processes that share one PostgreSQL catalog and one sto
 | Process | Project | Ports (dev) | Job |
 | --- | --- | --- | --- |
 | **Gateway** | `GM.FileStorage.Sample.Gateway.API` | `https://localhost:7141`, `http://localhost:5141` | The public edge: YARP reverse proxy (GM.Gateway), per-IP rate limits (GM.RateLimiting), Swagger UI |
-| **Files API** | `GM.FileStorage.Sample.API` | `https://localhost:7140`, `http://localhost:5140` | Serves every file request, applies migrations at startup |
+| **Files API** | `GM.FileStorage.Sample.API` | `https://localhost:7140` | Serves every file request, applies migrations at startup |
 | **Worker** | `GM.FileStorage.Sample.Worker` | none | Runs `StorageCleanupJob` every minute |
 
 **Diagrams in this doc:** [System architecture](#system-architecture--flowchart) · [Layers](#layers--dependency-graph) · [Data model](#data-model--er-diagram)  
