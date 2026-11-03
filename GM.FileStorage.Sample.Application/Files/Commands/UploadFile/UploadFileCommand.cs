@@ -1,4 +1,5 @@
 using FluentValidation;
+using GM.Exceptions;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
@@ -61,14 +62,24 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
         };
 
-        var stored = await storage.UploadAsync(
-            new FileUploadRequest(request.Content!, request.FileName!, request.ContentType!)
-            {
-                Key = request.Key,
-                Visibility = FileVisibility.Private,
-                Metadata = metadata,
-            },
-            cancellationToken);
+        // FileStorage:MaxFileSize / AllowedContentTypes / VerifyContentType are enforced inside UploadAsync, before
+        // anything is kept; a rejection is the caller's mistake, so it surfaces as a 400 with the reason.
+        FileMetadata stored;
+        try
+        {
+            stored = await storage.UploadAsync(
+                new FileUploadRequest(request.Content!, request.FileName!, request.ContentType!)
+                {
+                    Key = request.Key,
+                    Visibility = FileVisibility.Private,
+                    Metadata = metadata,
+                },
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is FileTooLargeException or FileContentTypeNotAllowedException or FileContentTypeMismatchException)
+        {
+            throw new BadRequestException(ex.Message);
+        }
 
         try
         {

@@ -77,7 +77,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
         using var client = _factory.CreateClient();
-        var original = Encoding.UTF8.GetBytes("passport scan bytes");
+        var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
         // Upload: a tenant/user-scoped key, recorded in the catalog.
         var uploaded = await UploadAsync(client, original, "passport.pdf", $"tenantId={_tenantId}&userId=u1");
@@ -121,7 +121,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.False(File.Exists(Path.Combine(_root, uploaded.Key)));
 
         // Re-upload to the same key: the same row comes back, with the new content and metadata.
-        var replacement = Encoding.UTF8.GetBytes("a newer passport scan");
+        var replacement = Encoding.UTF8.GetBytes("%PDF-1.7 a newer passport scan");
         var reuploaded = await UploadAsync(client, replacement, "passport-v2.pdf",
             $"tenantId={_tenantId}&userId=u2&key={Uri.EscapeDataString(uploaded.Key)}");
         Assert.Equal(uploaded.Id, reuploaded.Id);
@@ -153,6 +153,68 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{key}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/v1/files/{key}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/presign/{key}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Download_honours_range_requests()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        var bytes = Encoding.ASCII.GetBytes("%PDF-1.7 0123456789"); // 19 bytes
+        var uploaded = await UploadAsync(client, bytes, "video-ish.pdf", $"tenantId={_tenantId}&userId=u1");
+
+        async Task<HttpResponseMessage> GetRange(string range)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/files/{uploaded.Key}");
+            request.Headers.Range = RangeHeaderValue.Parse(range);
+            return await client.SendAsync(request);
+        }
+
+        var middle = await GetRange("bytes=9-12");
+        Assert.Equal(HttpStatusCode.PartialContent, middle.StatusCode);
+        Assert.Equal("bytes 9-12/19", middle.Content.Headers.ContentRange!.ToString());
+        Assert.Equal("0123", await middle.Content.ReadAsStringAsync());
+
+        var tail = await GetRange("bytes=-3");
+        Assert.Equal("bytes 16-18/19", tail.Content.Headers.ContentRange!.ToString());
+        Assert.Equal("789", await tail.Content.ReadAsStringAsync());
+
+        var pastTheEnd = await GetRange("bytes=19-");
+        Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, pastTheEnd.StatusCode);
+        Assert.Equal("bytes */19", pastTheEnd.Content.Headers.ContentRange!.ToString());
+
+        var whole = await client.GetAsync($"/api/v1/files/{uploaded.Key}");
+        Assert.Equal(HttpStatusCode.OK, whole.StatusCode);
+        Assert.Contains("bytes", whole.Headers.AcceptRanges);
+    }
+
+    [Fact]
+    public async Task Upload_rejects_files_that_break_the_upload_rules()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+
+        // An executable dressed up as a PDF: the bytes give it away (FileStorage:VerifyContentType).
+        var disguised = await PostAsync(client, [(byte)'M', (byte)'Z', 0x90, 0, 3, 0, 0, 0], "invoice.pdf", "application/pdf");
+        Assert.Equal(HttpStatusCode.BadRequest, disguised.StatusCode);
+        Assert.Contains("application/vnd.microsoft.portable-executable", await disguised.Content.ReadAsStringAsync());
+
+        // A type outside FileStorage:AllowedContentTypes.
+        var html = await PostAsync(client, Encoding.UTF8.GetBytes("<html></html>"), "page.html", "text/html");
+        Assert.Equal(HttpStatusCode.BadRequest, html.StatusCode);
+
+        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+    }
+
+    private async Task<HttpResponseMessage> PostAsync(HttpClient client, byte[] bytes, string fileName, string contentType)
+    {
+        using var form = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(bytes);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(fileContent, "file", fileName);
+        return await client.PostAsync($"/api/v1/files?tenantId={_tenantId}&userId=u1", form);
     }
 
     private static async Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName, string query)

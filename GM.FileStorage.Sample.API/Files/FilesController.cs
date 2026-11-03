@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -103,18 +104,58 @@ public class FilesController : BaseController
     /// <summary>
     /// Download File
     /// </summary>
-    /// <remarks>Streamed straight from storage, never buffered whole.</remarks>
+    /// <remarks>
+    /// Streamed straight from storage, never buffered whole. Honours a single HTTP <c>Range</c> (<c>bytes=0-1023</c>,
+    /// <c>bytes=1024-</c>, <c>bytes=-500</c>) with <c>206 Partial Content</c>, so video players can seek and
+    /// downloads can resume; only the requested bytes are read from storage.
+    /// </remarks>
     /// <param name="key">The file's storage key</param>
     /// <param name="cancellationToken"></param>
     [HttpGet("files/{**key}", Name = nameof(DownloadFile))]
     [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status206PartialContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> DownloadFile(
         [FromRoute] string key,
         CancellationToken cancellationToken)
     {
-        var response = await Mediator.Send(new DownloadFileQuery { Key = key }, cancellationToken);
-        return File(response.Content, response.ContentType, response.FileName);
+        var query = new DownloadFileQuery { Key = key };
+        var requested = Request.GetTypedHeaders().Range;
+        // One range only; for several (rare), RFC 9110 lets us send the whole file instead.
+        if (requested is { Unit.Value: "bytes", Ranges.Count: 1 } && requested.Ranges.Single() is var r)
+        {
+            if (r.From is { } from)
+                query.Range = new FileByteRange(from, r.To is { } to ? to - from + 1 : null);
+            else
+                query.SuffixLength = r.To;
+        }
+
+        FileContentDto response;
+        try
+        {
+            response = await Mediator.Send(query, cancellationToken);
+        }
+        catch (FileRangeNotSatisfiableException ex)
+        {
+            Response.Headers.ContentRange = $"bytes */{ex.Size}";
+            return StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+        }
+
+        Response.Headers.AcceptRanges = "bytes";
+        if (response.Range is not { } range)
+            return File(response.Content, response.ContentType, response.FileName);
+
+        await using (response.Content)
+        {
+            Response.StatusCode = StatusCodes.Status206PartialContent;
+            Response.ContentType = response.ContentType;
+            Response.ContentLength = range.Length;
+            Response.Headers.ContentRange = range.ToContentRange(response.Size);
+            await response.Content.CopyToAsync(Response.Body, cancellationToken);
+        }
+
+        return new EmptyResult();
     }
 
     /// <summary>
