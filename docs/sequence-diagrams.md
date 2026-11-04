@@ -17,7 +17,7 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -325,52 +325,6 @@ sequenceDiagram
         API->>DB: UPDATE + domain event (restored), one transaction
         API-->>API: 204
     end
-```
-
-## Presign — sequence
-
-`GET /api/v1/files/{id}/presign`
-
-```mermaid
----
-title: Presign — sequence
----
-sequenceDiagram
-    autonumber
-    actor C as Client
-    participant API
-    participant DB
-    participant S as Storage
-
-    C->>API: GET …/presign
-    API->>DB: live file by id
-    alt not found
-        API-->>C: 404
-    end
-    API->>S: GetPresignedUrlAsync(storage key, expiry)
-    alt can't sign (encryption on, or Local without PublicBaseUrl)
-        S-->>API: NotSupportedException
-        API-->>C: 400 with the reason
-    else
-        S-->>API: signed URL
-        API-->>C: 200 { url, expiresAtUtc }
-    end
-
-    Note over C,S: S3 / Azure: the link goes straight to storage
-    C->>S: GET url
-
-    Note over C,S: Local disk: the link is {PublicBaseUrl}/{storage key}?expires&op&sig, served by the API
-    C->>API: GET /files/{storage key}?… (through the gateway)
-    API->>API: LocalPresignedUrlValidator: HMAC signature, expiry, op=read
-    alt invalid or expired
-        API-->>C: 403
-    end
-    API->>DB: live file by storage key
-    alt deleted since the link was made
-        API-->>C: 404
-    end
-    API->>S: DownloadAsync(storage key)
-    API-->>C: 200 the file (streamed)
 ```
 
 ## Encryption at rest — sequence

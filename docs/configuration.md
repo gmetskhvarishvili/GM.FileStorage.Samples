@@ -47,8 +47,6 @@ flowchart LR
 | `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
 | `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
 | `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
-| `FileStorage:Local:SigningKey` (signs local-disk presigned links) | | ✓ | | appsecrets.json |
-| `FileStorage:Local:PublicBaseUrl` (where those links point: the gateway's `/files`) | | ✓ | | appsettings.json |
 
 ¹ The worker only deletes objects, so of these it needs only `Provider` and the provider's own settings.
 
@@ -71,7 +69,6 @@ Routes are matched in order of specificity; each names a rate-limit policy and t
 | `files-upload` | `POST /api/{version}/files` | `uploads` |
 | `files-batch-upload` | `POST /api/{version}/files/batch` | `uploads` |
 | `files` | `/api/{version}/files/{**catch-all}` | `api` |
-| `files-presigned` | `GET /files/{**catch-all}` (local-disk presigned links) | `api` |
 | `files-api-docs` | `GET /swagger/{**catch-all}` | none |
 
 | Policy | Algorithm | Limit |

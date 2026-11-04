@@ -5,7 +5,7 @@ What a caller can do with a file, and every outcome they can get back. A caller 
 it, so another tenant's id (or the shared space's) answers `404`, like an unknown one. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Typical session](#typical-session--user-journey)  
 All diagrams: [index](README.md)
 
 ## File lifecycle — state diagram
@@ -24,7 +24,7 @@ stateDiagram-v2
     state Live {
         direction LR
         [*] --> Listed
-        Listed: listed, details, download, presign
+        Listed: listed, details, download
     }
     state Deleted {
         direction LR
@@ -188,7 +188,7 @@ flowchart TD
     start([DELETE /api/v1/files/id]) --> live{Your tenant's live file?}
     live -- no, unknown or already deleted --> f404[404]
     live -- yes --> ok[204 No Content]
-    ok --> after([Hidden from list, download and presign<br/>bytes kept, restorable any time])
+    ok --> after([Hidden from list and download<br/>bytes kept, restorable any time])
 ```
 
 ## Restore — user flow
@@ -206,31 +206,6 @@ flowchart TD
     ok --> after([Back as it was:<br/>same content, same record])
 ```
 
-## Presign — user flow
-
-```mermaid
----
-title: Presign — user flow
----
-flowchart TD
-    start([GET /api/v1/files/id/presign]) --> live{Your tenant's live file?}
-    live -- no --> f404[404]
-    live -- yes --> can{Can the storage hand out<br/>direct links?}
-    can -- "no: encryption on, or Local<br/>without PublicBaseUrl" --> r400[400 with the reason<br/>download through the API instead]
-    can -- "yes: S3, Azure, Local with PublicBaseUrl" --> ok[200 url, expiresAtUtc]
-    ok --> where{Which storage?}
-    where -- S3 / Azure --> direct([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
-    where -- "Local disk" --> fetch([GET the link: gateway → /files/key])
-    fetch --> sig{Signature, expiry<br/>and op=read valid?}
-    sig -- no --> s403[403]
-    sig -- yes --> still{File still live?}
-    still -- "no, deleted since" --> d404[404]
-    still -- yes --> served[200 the file]
-```
-
-A file's content never changes, so a link always serves the bytes that were uploaded. On local disk the link is
-signed with `FileStorage:Local:SigningKey`, so it can't be pointed at another file, extended, or used to write.
-
 ## Typical session — user journey
 
 ```mermaid
@@ -244,7 +219,6 @@ journey
     section Use
       Download it: 5: Caller
       Resume a download with Range: 4: Caller
-      Share a time-limited link: 3: Caller
     section Change
       Upload a newer scan as a new file: 4: Caller
       Delete it by mistake: 2: Caller

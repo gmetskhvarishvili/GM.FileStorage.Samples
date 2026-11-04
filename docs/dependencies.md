@@ -29,7 +29,7 @@ flowchart LR
     gw -->|forwards requests| api
     gw -->|readiness: GET /health/live| api
     api -->|catalog, cleanup queue, domain events| pg
-    api -->|upload, download, exists, delete, presign| store
+    api -->|upload, download, exists, delete| store
     worker -->|cleanup queue, file rows| pg
     worker -->|delete| store
     secrets -.->|connection string, cloud credentials, master keys| api
@@ -186,7 +186,6 @@ classDiagram
         +DownloadFile()
         +DeleteFile()
         +RestoreFile()
-        +PresignFile()
     }
     class IMediator
     class UploadFileCommandHandler
@@ -200,7 +199,6 @@ classDiagram
     class GetFilesListQueryHandler
     class GetFileDetailsQueryHandler
     class DownloadFileQueryHandler
-    class GetFilePresignedUrlQueryHandler
 
     class IUnitOfWork {
         +StoredFileRepository
@@ -212,7 +210,6 @@ classDiagram
         +DownloadAsync()
         +ExistsAsync()
         +DeleteAsync()
-        +GetPresignedUrlAsync()
     }
     class IFileKeyStrategy {
         +GenerateKey()
@@ -232,7 +229,6 @@ classDiagram
     IMediator ..> GetFilesListQueryHandler
     IMediator ..> GetFileDetailsQueryHandler
     IMediator ..> DownloadFileQueryHandler
-    IMediator ..> GetFilePresignedUrlQueryHandler
 
     UploadFileCommandHandler --> IUnitOfWork
     UploadFileCommandHandler --> IFileStorageService
@@ -244,8 +240,6 @@ classDiagram
     GetFileDetailsQueryHandler --> IUnitOfWork
     DownloadFileQueryHandler --> IUnitOfWork
     DownloadFileQueryHandler --> IFileStorageService
-    GetFilePresignedUrlQueryHandler --> IUnitOfWork
-    GetFilePresignedUrlQueryHandler --> IFileStorageService
     StorageCleanupJob --> IUnitOfWork
     StorageCleanupJob --> IFileStorageService
 ```

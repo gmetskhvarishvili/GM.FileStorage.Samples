@@ -21,7 +21,7 @@ namespace GM.FileStorage.Sample.Tests;
 
 /// <summary>
 /// The sample with encryption at rest switched on (a master key under FileStorage:Encryption): the bytes on disk are
-/// ciphertext, while uploads, downloads and ranges over HTTP behave exactly as without it, and presign is refused.
+/// ciphertext, while uploads, downloads and ranges over HTTP behave exactly as without it.
 /// Requires Postgres; no-ops if it isn't reachable.
 /// </summary>
 public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
@@ -107,9 +107,6 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         var range = await client.SendAsync(request);
         Assert.Equal(HttpStatusCode.PartialContent, range.StatusCode);
         Assert.Equal("X1234567", await range.Content.ReadAsStringAsync());
-
-        // A presigned link would serve ciphertext, so it's refused.
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/presign")).StatusCode);
     }
 
     private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);

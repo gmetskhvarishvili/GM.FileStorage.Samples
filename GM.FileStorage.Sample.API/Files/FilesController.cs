@@ -10,7 +10,6 @@ using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFiles;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
-using GM.FileStorage.Sample.Application.Files.Queries.GetFilePresignedUrl;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFilesList;
 using GM.FileStorage.Sample.Application.Files.Queries.GetTenantUsage;
 using Mapster;
@@ -25,7 +24,7 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
-/// Files Controller — upload (one file or a batch), list, inspect, download, delete, restore and presign files. A
+/// Files Controller — upload (one file or a batch), list, inspect, download, delete and restore files. A
 /// file's content never changes after upload; new content is a new file. A file is
 /// identified by one GUID (its id), and that is all callers see of it: its bytes are stored in the storage provider
 /// behind <c>IFileStorageService</c>, under a folder path from <c>FileStorage:KeyTemplate</c> built on the id; every upload is also recorded in the catalog (a stored-file row plus its
@@ -282,23 +281,5 @@ public class FilesController(UploadQuota quota) : BaseController
     {
         await Mediator.Send(new RestoreFileCommand { Id = id }, cancellationToken);
         return NoContent();
-    }
-
-    /// <summary>
-    /// Presign File
-    /// </summary>
-    /// <remarks>A time-limited link to a file (needs <c>FileStorage:Local:PublicBaseUrl</c> for the local provider).</remarks>
-    /// <param name="id">The file's id</param>
-    /// <param name="cancellationToken"></param>
-    [HttpGet("files/{id:guid}/presign", Name = nameof(PresignFile))]
-    [ProducesResponseType(typeof(PresignedUrlModel), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> PresignFile(
-        [FromRoute] Guid id,
-        CancellationToken cancellationToken)
-    {
-        var response = await Mediator.Send(new GetFilePresignedUrlQuery { Id = id }, cancellationToken);
-        var result = response.Adapt<PresignedUrlModel>();
-        return Ok(result);
     }
 }
