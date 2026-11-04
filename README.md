@@ -122,9 +122,10 @@ flowchart LR
   and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
-  (required) and `X-User-Id` (optional, else `anon`), through `ICurrentActor`, as in every GM service. Uploads
-  are recorded under them, the list and usage only ever show the caller's tenant, and another tenant's file is a
-  `404` on every endpoint, as if it didn't exist. A request without `X-Tenant-Id` gets a `400`. The gateway passes
+  and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
+  and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
+  didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
+  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the user is `anon`. The gateway passes
   the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
   sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
   sets them from the token.
@@ -243,8 +244,8 @@ because a direct link would serve ciphertext.
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
-Every `/api/v1` call carries `X-Tenant-Id` (a GUID), and optionally `X-User-Id`; the links under `/files` are
-signed instead. Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
+`/api/v1` calls may carry `X-Tenant-Id` (a GUID) and `X-User-Id`; without a tenant they work in the shared
+`public` space. The links under `/files` are signed instead. Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
 30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
 
 ## Database setup
@@ -302,7 +303,7 @@ dotnet run --project GM.FileStorage.Sample.Worker       # storage cleanup, every
 dotnet run --project GM.FileStorage.Sample.Gateway.API  # https://localhost:7141, Swagger UI at /
 ```
 
-Then call the gateway, as a tenant (any GUID):
+Then call the gateway, as a tenant (any GUID; leave `-H "$T"` out to use the shared space):
 
 ```bash
 T="X-Tenant-Id: 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71"

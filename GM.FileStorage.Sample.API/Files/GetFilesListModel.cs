@@ -6,7 +6,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GM.FileStorage.Sample.API.Files;
 
-/// <summary>Get files list model: the caller's tenant's files (<c>X-Tenant-Id</c>).</summary>
+/// <summary>Get files list model: the caller's tenant's files (<c>X-Tenant-Id</c>, else the shared <c>public</c> space).</summary>
 public class GetFilesListModel : GetBaseListModel
 {
     /// <summary>The id of the stored file.</summary>

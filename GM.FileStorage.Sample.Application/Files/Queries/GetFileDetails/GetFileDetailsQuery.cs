@@ -35,7 +35,7 @@ public class GetFileDetailsQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
     {
         var entity = await unitOfWork.StoredFileRepository
             .Query(true, null)
-            .OwnedBy(actor.RequireTenant())
+            .OwnedBy(actor.TenantOrShared())
             .Include(x => x.Metadata)
             .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && (request.Visibility.HasFlag(VisibilityScope.IncludeInactive) || x.IsActive)

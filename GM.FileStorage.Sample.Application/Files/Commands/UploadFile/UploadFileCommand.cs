@@ -63,7 +63,7 @@ public class UploadFileCommandHandler(
         // The caller's tenant and user travel as upload metadata, kept by the catalog as searchable rows.
         var metadata = new Dictionary<string, string>
         {
-            [StoredFileMetadataNames.TenantId] = actor.RequireTenant(),
+            [StoredFileMetadataNames.TenantId] = actor.TenantOrShared(),
             [StoredFileMetadataNames.UserId] = actor.UserOrAnonymous(),
         };
 

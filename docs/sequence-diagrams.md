@@ -103,7 +103,7 @@ sequenceDiagram
 
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
-    API->>API: validate (file name, content type), tenant from X-Tenant-Id
+    API->>API: validate (file name, content type), tenant from X-Tenant-Id or public
     API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
@@ -160,7 +160,6 @@ sequenceDiagram
     participant S as Storage
 
     C->>B: UploadFilesCommand (file parts as they arrive)
-    B->>B: the caller has a tenant (X-Tenant-Id), else 400
     loop each file part, as it arrives off the request
         alt already 20 files
             B->>DB: discard the stored files (rows removed, bytes queued and deleted)
@@ -234,7 +233,7 @@ cleanup entry queued at the start.
 
 ## List — sequence
 
-`GET /api/v1/files?userId=&folder=&contentType=&currentPage=&pageSize=` with `X-Tenant-Id`
+`GET /api/v1/files?userId=&folder=&contentType=&currentPage=&pageSize=` with an optional `X-Tenant-Id`
 
 ```mermaid
 ---

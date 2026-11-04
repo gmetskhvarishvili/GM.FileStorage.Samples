@@ -39,7 +39,7 @@ public class GetFilesListQueryHandler(IUnitOfWork unitOfWork, ICurrentActor acto
         GetFilesListQuery request, CancellationToken cancellationToken)
     {
         // Always the caller's own files.
-        var tenantId = actor.RequireTenant();
+        var tenantId = actor.TenantOrShared();
         var dateRange = request.ToAuditDateRange();
         var paging = request.ToPagingOptions();
 

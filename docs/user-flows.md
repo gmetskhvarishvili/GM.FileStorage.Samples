@@ -1,8 +1,8 @@
 # User flows
 
-What a caller can do with a file, and every outcome they can get back. Every `/api/v1` call names the caller's
-tenant in `X-Tenant-Id` (without it: `400`); a file only exists for the tenant that uploaded it, so another
-tenant's id answers `404`, like an unknown one. Each flow starts at the gateway
+What a caller can do with a file, and every outcome they can get back. A caller may name its tenant in
+`X-Tenant-Id`; without it, it works in a shared space, `public`. A file only exists for the tenant that uploaded
+it, so another tenant's id (or the shared space's) answers `404`, like an unknown one. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
 **Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [Direct upload](#direct-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
@@ -71,9 +71,7 @@ files it holds.
 title: Upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files<br/>multipart file, X-Tenant-Id, X-User-Id?]) --> tenant{X-Tenant-Id sent?}
-    tenant -- no --> t400[400 send X-Tenant-Id]
-    tenant -- yes --> any{A file part?}
+    start([POST /api/v1/files<br/>multipart file, X-Tenant-Id?, X-User-Id?]) --> any{A file part?}
     any -- no --> n400[400 no file sent]
     any -- yes --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
@@ -88,8 +86,8 @@ flowchart TD
     ok --> next([Keep the id: every other call uses it])
 ```
 
-The file belongs to the caller's tenant (`X-Tenant-Id`), and only that tenant ever sees it. Without `X-User-Id`
-it is recorded as uploaded by `anon`.
+The file belongs to the caller's tenant (`X-Tenant-Id`, else the shared `public` space), and only that tenant ever
+sees it. Without `X-User-Id` it is recorded as uploaded by `anon`.
 
 To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
 a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
@@ -107,9 +105,7 @@ seen after the first is stored: the first is then discarded (rows and bytes, not
 title: Batch upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/batch<br/>multipart files, X-Tenant-Id, X-User-Id?]) --> tenant{X-Tenant-Id sent?}
-    tenant -- no --> t400[400 send X-Tenant-Id]
-    tenant -- yes --> each[[Each file part, as it arrives]]
+    start([POST /api/v1/files/batch<br/>multipart files, X-Tenant-Id?, X-User-Id?]) --> each[[Each file part, as it arrives]]
     each --> limit{Already 20 files?}
     limit -- yes --> c400[400 too many files<br/>the stored ones are discarded]
     limit -- no --> one{Stored as<br/>POST /files would?}
@@ -138,7 +134,7 @@ batch is all-or-nothing about its size. The whole request is still capped at 60 
 title: Direct upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size, X-Tenant-Id]) --> quota{Upload permit left?<br/>30 files a minute}
+    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size, X-Tenant-Id?]) --> quota{Upload permit left?<br/>30 files a minute}
     quota -- no --> q429[429 + Retry-After]
     quota -- yes --> rules{Type allowed, size within 5 GB,<br/>links possible?}
     rules -- no --> r400[400 with the reason<br/>e.g. encryption at rest is on]
@@ -166,7 +162,7 @@ encryption at rest: the client can't encrypt for the API.
 title: List — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files<br/>X-Tenant-Id]) --> filters[Optional filters:<br/>userId · folder · contentType<br/>dates · visibility]
+    start([GET /api/v1/files<br/>X-Tenant-Id?]) --> filters[Optional filters:<br/>userId · folder · contentType<br/>dates · visibility]
     filters --> paging[Optional paging:<br/>currentPage · pageSize · ordering]
     paging --> res[200 page of files<br/>+ X-Pagination header]
     res --> more{More pages?}

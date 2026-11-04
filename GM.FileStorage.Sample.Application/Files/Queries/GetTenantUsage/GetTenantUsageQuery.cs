@@ -19,7 +19,7 @@ public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOp
 {
     public async Task<TenantUsageDto> Handle(GetTenantUsageQuery request, CancellationToken cancellationToken)
     {
-        var tenantId = actor.RequireTenant();
+        var tenantId = actor.TenantOrShared();
         var (used, files) = await TenantQuota.UsageAsync(unitOfWork, tenantId, cancellationToken);
         var limit = quota.Value.BytesPerTenant;
         return new TenantUsageDto

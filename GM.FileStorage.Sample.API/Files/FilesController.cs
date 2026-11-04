@@ -35,7 +35,8 @@ namespace GM.FileStorage.Sample.API.Files;
 /// searchable metadata), which is what the list and details endpoints read.
 /// <para>
 /// Every file belongs to the caller's tenant, taken from <c>X-Tenant-Id</c> (GM's actor headers, a token claim once
-/// sign-in is added). Each endpoint needs it, and another tenant's file answers 404.
+/// sign-in is added), and another tenant's file answers 404. Without the header, the caller works in a shared space
+/// (<c>public</c>) that no tenant sees into.
 /// </para>
 /// </summary>
 [ApiController]
@@ -50,8 +51,8 @@ public class FilesController(UploadQuota quota) : BaseController
     /// <remarks>
     /// Multipart <c>file</c>: exactly one (for several, use <c>POST files/batch</c>). Creates a new file identified by
     /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c>, the stored name returned as
-    /// <c>storageKey</c>. The caller's tenant (<c>X-Tenant-Id</c>, required) and user (<c>X-User-Id</c>, optional) are
-    /// recorded as the file's searchable metadata; the file is only ever visible to that tenant.
+    /// <c>storageKey</c>. The caller's tenant (<c>X-Tenant-Id</c>, else <c>public</c>) and user (<c>X-User-Id</c>, else
+    /// <c>anon</c>) are recorded as the file's searchable metadata; the file is only ever visible to that tenant.
     /// <para>
     /// The file is streamed from the request straight into storage, never buffered: a file over
     /// <c>FileStorage:MaxFileSize</c> is cut off as soon as it passes the limit.

@@ -43,7 +43,7 @@ public class CompleteDirectUploadCommandHandler(
     public async Task<UploadedFileDto> Handle(CompleteDirectUploadCommand request, CancellationToken cancellationToken)
     {
         // Only the tenant that started the upload can complete it.
-        var tenantId = actor.RequireTenant();
+        var tenantId = actor.TenantOrShared();
         var upload = await unitOfWork.DirectUploadRepository
             .FirstOrDefaultAsync(x => x.Id == request.UploadId && x.TenantId == tenantId, false, null, cancellationToken)
             ?? throw new NotFoundException(StringResource.File, StringResource.Id, request.UploadId);

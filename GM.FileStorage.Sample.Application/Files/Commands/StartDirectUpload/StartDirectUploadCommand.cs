@@ -62,7 +62,7 @@ public class StartDirectUploadCommandHandler(
         if (!UploadRules.IsAllowed(storageOptions.Value, request.ContentType!))
             throw new BadRequestException($"Content type '{request.ContentType}' is not allowed.");
 
-        var tenantId = actor.RequireTenant();
+        var tenantId = actor.TenantOrShared();
         var userId = actor.UserOrAnonymous();
 
         // The declared size counts against the tenant's quota from now (the pending upload is part of its usage), and

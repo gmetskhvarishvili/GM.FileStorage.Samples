@@ -33,7 +33,7 @@ public class GetFilePresignedUrlQueryHandler(IUnitOfWork unitOfWork, IFileStorag
 {
     public async Task<FilePresignedUrlDto> Handle(GetFilePresignedUrlQuery request, CancellationToken cancellationToken)
     {
-        var tenantId = actor.RequireTenant();
+        var tenantId = actor.TenantOrShared();
         var entity = await unitOfWork.StoredFileRepository
             .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && x.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId)

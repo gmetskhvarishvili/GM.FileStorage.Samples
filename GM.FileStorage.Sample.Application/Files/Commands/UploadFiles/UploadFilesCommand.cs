@@ -1,7 +1,5 @@
 using FluentValidation;
-using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
-using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Application.Files.Commands.DiscardFiles;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.Mediator.Contracts;
@@ -53,14 +51,11 @@ public class UploadFilesCommandValidator : AbstractValidator<UploadFilesCommand>
 /// (<see cref="DiscardFilesCommand"/>): the caller never got their ids, so nothing is kept.
 /// </para>
 /// </remarks>
-public class UploadFilesCommandHandler(IMediator mediator, ICurrentActor actor, ILogger<UploadFilesCommandHandler> logger)
+public class UploadFilesCommandHandler(IMediator mediator, ILogger<UploadFilesCommandHandler> logger)
     : IRequestHandler<UploadFilesCommand, IReadOnlyList<UploadFileResultDto>>
 {
     public async Task<IReadOnlyList<UploadFileResultDto>> Handle(UploadFilesCommand request, CancellationToken cancellationToken)
     {
-        // Without a tenant no file could be stored: refuse the request rather than fail every file.
-        actor.RequireTenant();
-
         var results = new List<UploadFileResultDto>();
         try
         {

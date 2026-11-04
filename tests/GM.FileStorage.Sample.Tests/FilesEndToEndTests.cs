@@ -57,9 +57,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         return client;
     }
 
-    // This test's files: the ones tagged with its unique tenant id.
+    // This test's files: stored under its own key prefix, whichever tenant they were uploaded for.
     private IQueryable<StoredFile> OurFiles(ApplicationDbContext context) =>
-        context.Set<StoredFile>().Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == _tenantId));
+        context.Set<StoredFile>().Where(f => f.StorageKey.StartsWith(_tenantId));
 
     public async Task InitializeAsync()
     {
@@ -257,15 +257,19 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/api/v1/files/{ours.Id}/restore", null)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{ours.Id}/restore", null)).StatusCode);
 
-        // Without X-Tenant-Id nothing is stored or listed.
+        // Without X-Tenant-Id the caller works in the shared "public" space: no tenant sees its files, nor it theirs.
+        // (The shared space may hold other files on this database, so it's checked by id.)
         using var nobody = _factory.CreateClient();
-        var refused = await SendFileAsync(nobody, HttpMethod.Post, "/api/v1/files", bytes, "nobody.pdf", "application/pdf");
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Contains("X-Tenant-Id", await refused.Content.ReadAsStringAsync());
-        Assert.Equal(HttpStatusCode.BadRequest,
+        var shared = await UploadAsync(nobody, bytes, "shared.pdf");
+        Assert.Equal(("public", "anon"), (await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}")) is { } s
+            ? (s.Metadata!["tenantId"], s.Metadata!["userId"]) : default);
+        Assert.Single(await ListAsync(nobody, $"id={shared.Id}"));
+        Assert.Equal(HttpStatusCode.OK,
             (await SendFilesAsync(nobody, "/api/v1/files/batch", ("a.pdf", "application/pdf", bytes))).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await nobody.GetAsync("/api/v1/files")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await nobody.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
+        Assert.Empty(await ListAsync(client, $"id={shared.Id}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{shared.Id}/content")).StatusCode);
+        Assert.Empty(await ListAsync(nobody, $"id={ours.Id}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await nobody.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
 
         // Ours is untouched, and the direct upload still completes for us.
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{ours.Id}/content"));
