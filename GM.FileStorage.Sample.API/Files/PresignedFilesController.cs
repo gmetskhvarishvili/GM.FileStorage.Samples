@@ -1,5 +1,5 @@
 using Asp.Versioning;
-using GM.Mediator.Contracts;
+using GM.API.Controllers;
 using GM.FileStorage.Local;
 using GM.FileStorage.Sample.API.Files.Multipart;
 using GM.FileStorage.Sample.Application.Files.Commands.ReceiveDirectUpload;
@@ -19,8 +19,7 @@ namespace GM.FileStorage.Sample.API.Files;
 [ApiController]
 [ApiVersionNeutral]
 [Route("files")]
-// Not GM.API's BaseController: that one only accepts JSON bodies, and a write link's body is the file itself.
-public class PresignedFilesController(LocalPresignedUrlValidator links, IMediator mediator) : ControllerBase
+public class PresignedFilesController(LocalPresignedUrlValidator links) : BaseController
 {
     /// <summary>
     /// Download Through A Presigned Link
@@ -48,7 +47,7 @@ public class PresignedFilesController(LocalPresignedUrlValidator links, IMediato
         if (!links.IsValid(storageKey, expires, op, sig))
             return StatusCode(StatusCodes.Status403Forbidden);
 
-        var response = await mediator.Send(new DownloadPresignedFileQuery { StorageKey = storageKey }, cancellationToken);
+        var response = await Mediator.Send(new DownloadPresignedFileQuery { StorageKey = storageKey }, cancellationToken);
         return File(response.Content, response.ContentType, response.FileName);
     }
 
@@ -66,6 +65,8 @@ public class PresignedFilesController(LocalPresignedUrlValidator links, IMediato
     /// <param name="sig">The link's signature (HMAC-SHA256, hex)</param>
     /// <param name="cancellationToken"></param>
     [HttpPut("{**storageKey}", Name = nameof(UploadThroughPresignedLink))]
+    // The body is the file itself (application/pdf, image/png, …), not JSON.
+    [AcceptsAnyContentType]
     [RequestBodyErrors]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
@@ -81,7 +82,7 @@ public class PresignedFilesController(LocalPresignedUrlValidator links, IMediato
         if (!links.IsValid(storageKey, expires, op, sig, PresignedUrlOperation.Write))
             return StatusCode(StatusCodes.Status403Forbidden);
 
-        await mediator.Send(new ReceiveDirectUploadCommand { StorageKey = storageKey, Content = Request.Body }, cancellationToken);
+        await Mediator.Send(new ReceiveDirectUploadCommand { StorageKey = storageKey, Content = Request.Body }, cancellationToken);
         return Ok();
     }
 }
