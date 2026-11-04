@@ -53,7 +53,8 @@ flowchart LR
 > Every `GM.FileStorage*` reference here is pinned to **3.0.0** (the packages release in lockstep). 2.0.0 added
 > encryption at rest, key templates and upload rules, and removed `GMStoredFile.Replace`: a file's content
 > never changes after upload. 2.1.0 signs local-disk presigned links, 2.2.0 records checksums measured after
-> upload, and 3.0.0 removes `GMStoredFile.Key`: a file is its id, and key templates can build on it.
+> upload, 3.0.0 removes `GMStoredFile.Key` (a file is its id), 3.1.0 adds a stored file without metadata, and
+> 3.2.0 seals an encrypted file's name, type and metadata so storage learns nothing about it.
 
 ## Layers
 
@@ -145,29 +146,23 @@ A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are 
 made from `FileStorage:KeyTemplate` in appsettings.json and built on that id, with no code involved:
 
 ```jsonc
-"KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1cb2d4-… → documents/9f/9f1cb2d4….pdf
+"KeyTemplate": "{shard}/{id}"   // file 9f1cb2d4-… → 9f/9f1cb2d4…
 ```
 
-The storage key never leaves the API: callers only ever use the id. Anyone browsing the bucket or the disk can
-still tell which file an object belongs to.
+The storage key never leaves the API: callers only ever use the id. And the key says nothing about the file:
 
-- **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
-  from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
-  type is rejected, so a renamed `.exe` can't land in `images/`.
-  - The sample builds the storage key before uploading, from the declared type, so an
-    `application/octet-stream` upload lands in `other/`.
-  - When the library generates the key itself, it uses the detected type instead.
+- **No type, no name.** No `{category}` folder and no `{ext}`: someone browsing the bucket or the disk can't
+  tell a passport scan from a video. Together with encryption at rest (below), what's stored is an unreadable
+  object named by an id, and the only way to the file is through the API.
 - **`{shard}` spreads files out.** It's the first two characters of `{id}`, so files spread over 256
-  folders per category and no folder grows huge.
-- **`{id}{ext}` is the file's id plus its extension, cleaned up.** The sample picks the id first and hands it
-  to the key strategy (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
-- **Nothing identifying.** Tenant, user and date stay out of the path. They're columns in the catalog,
-  which is how files are found.
-- **Other layouts are a config change.**
-  - `{date:yyyy/MM}/{id}{ext}` gives date folders.
-  - `{meta:tenantId}/{category}/{id}{ext}` gives per-tenant folders. Metadata values are cleaned
-    before use, so they can't add folders or `..`.
-  - The template is checked at startup, so a typo fails fast.
+  folders and no folder grows huge.
+- **`{id}` is the file's id.** The sample picks the id first and hands it to the key strategy
+  (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
+- **Nothing identifying.** Tenant, user and date stay out of the path, and out of the object's metadata. They're
+  columns in the catalog, which is how files are found.
+- **Other layouts are a config change**, if hiding the type matters less than browsing storage by it:
+  `{category}/{shard}/{id}{ext}` gives `documents/9f/9f1c….pdf`, `{date:yyyy/MM}/{id}{ext}` date folders. The
+  template is checked at startup, so a typo fails fast.
 
 
 ## Keeping storage and the database in step
@@ -196,16 +191,16 @@ always queued for deletion in the `storage_cleanups` table.
 
 ## Encryption at rest
 
-Off by default. The master key is a secret, so it lives in `appsecrets.json` with the other secrets,
-never in appsettings.json. The template, `appsecrets.example.json`, comes with a random demo key
-(`local-dev`). Switch encryption on by setting `Enabled` to `true` in your `appsecrets.json`:
+On, in the API's and the worker's appsettings.json (the worker's integrity check reads files back). The master key
+is a secret, so it lives in `appsecrets.json` with the other secrets, never in appsettings.json; without one,
+storage fails at first use instead of quietly writing plaintext. The template, `appsecrets.example.json`, comes
+with a random demo key (`local-dev`), and docker-compose passes the same one:
 
 ```jsonc
 // appsecrets.json (gitignored)
 {
   "FileStorage": {
     "Encryption": {
-      "Enabled": true,
       "ActiveKeyId": "local-dev",
       "Keys": { "local-dev": "<base64 of 32 random bytes>" }
     }
@@ -218,8 +213,13 @@ generated with `openssl rand -base64 32` and kept safe in your secrets store or 
 the key means losing every file it encrypted.
 
 With it on, every file is encrypted with its own AES-256-GCM key, wrapped by the master key
-(`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Over HTTP nothing changes:
-uploads, downloads and range requests work as before.
+(`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Storage doesn't learn what the file
+is either: next to the bytes, the provider keeps only the name `encrypted` and the type
+`application/octet-stream`; the real name, type and checksum are sealed under the file's key and restored on
+download. Over HTTP nothing changes: uploads, downloads and range requests work as before.
+
+Files stored while encryption was off stay as they were, readable through the API and on disk alike, until
+they're uploaded again.
 
 ## Endpoints
 

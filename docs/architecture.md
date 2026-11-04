@@ -85,8 +85,8 @@ flowchart TB
 
 The gateway references no sample project; it only knows the API's address. The worker uses the same
 Persistence and Infrastructure as the API, but registers only what it needs (`AddWorkerInfrastructure`):
-file storage, a distributed lock and GM.Scheduling. It has no encryption, because deleting an object needs no
-keys.
+file storage with encryption (its integrity check reads files back, so it needs the same master keys), a
+distributed lock and GM.Scheduling.
 
 ## Data model — ER diagram
 
@@ -98,7 +98,7 @@ erDiagram
     stored_files {
         uuid id PK "the file's id; every route uses it"
         string tenant_id "X-Tenant-Id or public; indexed, every query is scoped to it"
-        string storage_key UK "where the bytes are, named after the id: documents/9f/9f1c….pdf"
+        string storage_key UK "where the bytes are, named after the id only: 9f/9f1c…"
         string file_name
         string content_type
         bigint size

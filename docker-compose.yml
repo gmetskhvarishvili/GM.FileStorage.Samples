@@ -26,6 +26,10 @@ x-app-environment: &app-environment
   Redis__ConnectionString: redis:6379
   # The storage root the API and the workers share (the file-storage volume).
   FileStorage__Local__RootPath: /data/file-storage
+  # Encryption at rest (on in appsettings.json) with the demo master key from appsecrets.example.json. The worker
+  # needs it too: its integrity check reads files back.
+  FileStorage__Encryption__ActiveKeyId: local-dev
+  FileStorage__Encryption__Keys__local-dev: "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo="
 
 services:
   postgres:

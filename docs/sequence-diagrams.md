@@ -104,7 +104,7 @@ sequenceDiagram
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
     API->>API: validate (file name, content type), tenant from X-Tenant-Id or public
-    API->>API: new file id, storage key from KeyTemplate on it<br/>documents/9f/9f1c….pdf
+    API->>API: new file id, storage key from KeyTemplate on it<br/>9f/9f1c…
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
     S->>S: check allowed type and bytes from the first bytes,<br/>count size as it streams
@@ -329,8 +329,8 @@ sequenceDiagram
 
 ## Encryption at rest — sequence
 
-With `FileStorage:Encryption:Enabled`, `EncryptingFileStorageService` wraps the provider. Upload and download
-look the same to the handlers.
+Encryption is on, so `EncryptingFileStorageService` wraps the provider. Upload and download look the same to the
+handlers, and the provider learns nothing about the file.
 
 ```mermaid
 ---
@@ -348,7 +348,8 @@ sequenceDiagram
     E->>E: random 256-bit file key + nonce prefix
     E->>K: active master key
     E->>E: wrap the file key (AES-256-GCM)
-    E->>P: header (key id, wrapped key) + 64 KiB chunks,<br/>each AES-256-GCM, encrypted as they stream
+    E->>E: seal the real name, type and checksum under the file key
+    E->>P: header (key id, wrapped key) + 64 KiB chunks,<br/>each AES-256-GCM, encrypted as they stream,<br/>named "encrypted", application/octet-stream, the sealed details
     P-->>E: stored
     E-->>H: plaintext size and checksum
 
@@ -356,7 +357,7 @@ sequenceDiagram
     H->>E: DownloadAsync(key, bytes 200 000–)
     E->>P: read the header
     E->>K: master key named in the header
-    E->>E: unwrap the file key
+    E->>E: unwrap the file key, unseal the real name, type and checksum
     E->>P: read from chunk 3 (200 000 / 65 536) on
     E-->>H: decrypting stream: each chunk authenticated, then skipped to the offset
 ```
