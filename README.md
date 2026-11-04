@@ -200,7 +200,8 @@ because a direct link would serve ciphertext.
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
-| `GET` | `/api/v1/files/{id}/presign` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
+| `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
+| `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 

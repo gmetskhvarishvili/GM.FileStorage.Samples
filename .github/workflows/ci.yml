@@ -74,6 +74,15 @@ jobs:
           cmp smoke.pdf back.pdf
           curl -sf http://localhost:8080/swagger/v1/swagger.json | jq -e '.paths | has("/api/v1/files/batch")'
 
+      - name: Presigned link through the gateway
+        run: |
+          id=$(curl -sf "http://localhost:8080/api/v1/files?tenantId=ci" | jq -r '.[0].id')
+          link=$(curl -sf "http://localhost:8080/api/v1/files/$id/presign" | jq -r .url)
+          echo "link $link"
+          curl -sf -o linked.pdf "$link"
+          cmp smoke.pdf linked.pdf
+          test "$(curl -s -o /dev/null -w '%{http_code}' "${link%%&sig=*}")" = 403
+
       - name: The API and the worker share the storage volume
         run: |
           docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .

@@ -208,10 +208,18 @@ flowchart TD
     live -- yes --> can{Can the storage hand out<br/>direct links?}
     can -- "no: encryption on, or Local<br/>without PublicBaseUrl" --> r400[400 with the reason<br/>download through the API instead]
     can -- "yes: S3, Azure, Local with PublicBaseUrl" --> ok[200 url, expiresAtUtc]
-    ok --> use([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
+    ok --> where{Which storage?}
+    where -- S3 / Azure --> direct([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
+    where -- "Local disk" --> fetch([GET the link: gateway → /files/key])
+    fetch --> sig{Signature, expiry<br/>and op=read valid?}
+    sig -- no --> s403[403]
+    sig -- yes --> still{File still live?}
+    still -- "no, deleted since" --> d404[404]
+    still -- yes --> served[200 the file]
 ```
 
-A file's content never changes, so a link always serves the bytes that were uploaded.
+A file's content never changes, so a link always serves the bytes that were uploaded. On local disk the link is
+signed with `FileStorage:Local:SigningKey`, so it can't be pointed at another file, extended, or used to write.
 
 ## Typical session — user journey
 

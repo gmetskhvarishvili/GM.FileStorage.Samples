@@ -356,8 +356,23 @@ sequenceDiagram
     else
         S-->>API: signed URL
         API-->>C: 200 { url, expiresAtUtc }
-        C->>S: GET url (straight to storage, no API)
     end
+
+    Note over C,S: S3 / Azure: the link goes straight to storage
+    C->>S: GET url
+
+    Note over C,S: Local disk: the link is {PublicBaseUrl}/{storage key}?expires&op&sig, served by the API
+    C->>API: GET /files/{storage key}?… (through the gateway)
+    API->>API: LocalPresignedUrlValidator: HMAC signature, expiry, op=read
+    alt invalid or expired
+        API-->>C: 403
+    end
+    API->>DB: live file by storage key
+    alt deleted since the link was made
+        API-->>C: 404
+    end
+    API->>S: DownloadAsync(storage key)
+    API-->>C: 200 the file (streamed)
 ```
 
 ## Encryption at rest — sequence

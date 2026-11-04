@@ -48,8 +48,10 @@ services:
     environment:
       <<: *app-environment
       ASPNETCORE_ENVIRONMENT: Development
-      # The local provider's dev-only presign links, as seen through the gateway.
+      # Presigned links on local disk point at the gateway, signed with this demo key (the one in
+      # appsecrets.example.json; use your own anywhere real).
       FileStorage__Local__PublicBaseUrl: http://localhost:8080/files
+      FileStorage__Local__SigningKey: "qPNCcLDn8ZXoh6z8LE9rPGYNWRMaHDSWDevspFMUGewh"
     volumes:
       - gm-filestorage-files:/data/file-storage
     depends_on:

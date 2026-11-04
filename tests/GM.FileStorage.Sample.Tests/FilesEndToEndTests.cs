@@ -273,6 +273,45 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Presigned_links_serve_the_file_until_altered_or_deleted()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 shared by link");
+        var uploaded = await UploadAsync(client, bytes, "shared.pdf", "userId=u1");
+
+        var presigned = await client.GetFromJsonAsync<PresignedResponse>($"/api/v1/files/{uploaded.Id}/presign");
+        Assert.NotNull(presigned);
+        // The link points at the gateway (PublicBaseUrl); its path and query are what reach this API.
+        var link = presigned.Url.PathAndQuery;
+        Assert.StartsWith($"/files/{_tenantId}/documents/", link);
+        Assert.Contains("&sig=", link);
+
+        // Anyone holding the link gets the file, no other credentials needed.
+        var served = await client.GetAsync(link);
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal(bytes, await served.Content.ReadAsByteArrayAsync());
+        Assert.Equal("shared.pdf", served.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+
+        // An altered link is refused: another signature, a later expiry, no signature, another operation.
+        var sig = link[(link.IndexOf("&sig=", StringComparison.Ordinal) + 5)..];
+        var forged = link.Replace(sig, new string('0', sig.Length), StringComparison.Ordinal);
+        var expires = link.Split('?')[1].Split('&').Single(p => p.StartsWith("expires=", StringComparison.Ordinal));
+        var extended = link.Replace(expires, $"expires={long.Parse(expires[8..], System.Globalization.CultureInfo.InvariantCulture) + 3600}", StringComparison.Ordinal);
+        var unsigned = link[..link.IndexOf("&sig=", StringComparison.Ordinal)];
+        var write = link.Replace("op=read", "op=write", StringComparison.Ordinal);
+        foreach (var altered in new[] { forged, extended, unsigned, write })
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(altered)).StatusCode);
+
+        // Deleting the file stops the link, though the bytes are kept; restoring brings it back.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(link)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(link)).StatusCode);
+    }
+
+    [Fact]
     public async Task Large_uploads_are_streamed_into_storage_intact()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
@@ -536,6 +575,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             }
         }
     }
+
+    private sealed record PresignedResponse(Uri Url, DateTime ExpiresAtUtc);
 
     private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);
 
