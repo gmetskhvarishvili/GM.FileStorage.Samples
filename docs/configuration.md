@@ -43,7 +43,7 @@ flowchart LR
 | `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json |
 | `FileStorage:Local:RootPath` | | ✓ | ✓ | appsettings.json — must be the same folder |
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
-| `FileStorage:Encryption:*` (master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsecrets.json |
+| `FileStorage:Encryption:Enabled` (on), `ActiveKeyId` and `Keys` (the master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsettings.json (on) / appsecrets.json (keys) |
 | `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
 | `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
 | `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
@@ -94,7 +94,7 @@ its deletes would miss the API's files and the queue would back off forever.
 
 ```jsonc
 "FileStorage": {
-  "KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1c… → documents/9f/9f1c….pdf
+  "KeyTemplate": "{shard}/{id}"   // file 9f1c… → 9f/9f1c…: nothing about the file in the path
 }
 ```
 

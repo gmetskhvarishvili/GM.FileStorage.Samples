@@ -18,7 +18,7 @@
     <ItemGroup>
       <PackageReference Include="GM.API.Application" Version="2.1.0" />
       <!-- IFileStorageService: the handlers store and read the bytes; the catalog rows go through IUnitOfWork. -->
-      <PackageReference Include="GM.FileStorage" Version="3.1.0" />
+      <PackageReference Include="GM.FileStorage" Version="3.2.0" />
       <PackageReference Include="GM.Mediator" Version="2.0.0" />
       <PackageReference Include="Mapster" Version="10.0.12" />
     </ItemGroup>

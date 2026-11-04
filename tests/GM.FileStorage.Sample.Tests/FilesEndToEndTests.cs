@@ -44,8 +44,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     public FilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            // The production layout, under a per-test folder: {tenant}/{category}/{shard}/{id}{ext}.
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}");
+            // The production layout, under a per-test folder: {tenant}/{shard}/{id}.
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}");
 
     // A client acting for this test's tenant and user, as the gateway would forward them.
     private HttpClient Client(GmWebApplicationFactory<Program> factory)
@@ -102,14 +102,21 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = Client(_factory);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit under {category}/{shard}/
-        // folders from the key template, named after that id (the shard is its first two characters).
+        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit at {shard}/{id} from the key
+        // template, named after that id (the shard is its first two characters), with nothing about the file in it.
         var uploaded = await UploadAsync(client, original, "passport.pdf");
         Assert.NotEqual(Guid.Empty, uploaded.Id);
         var hex = uploaded.Id.ToString("N");
         var path = await StoragePathAsync(uploaded.Id);
-        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", path);
+        Assert.Equal($"{_tenantId}/{hex[..2]}/{hex}", path);
         Assert.True(File.Exists(Path.Combine(_root, path)));
+
+        // Nothing in storage gives the file away: its bytes are ciphertext, and what's kept beside them names neither
+        // the file, its type nor its tenant. Only the API (holding the master key) can read it.
+        Assert.DoesNotContain("%PDF", Encoding.Latin1.GetString(await File.ReadAllBytesAsync(Path.Combine(_root, path))));
+        var sidecar = await File.ReadAllTextAsync(Path.Combine(_root, path + ".gmmeta"));
+        foreach (var secret in new[] { "passport", "pdf", _tenantId })
+            Assert.DoesNotContain(secret, sidecar, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(original.Length, uploaded.Size);
 
         // List by tenant: exactly this file, with its tenant and uploader and nothing of where it's stored.
@@ -184,7 +191,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var live = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 live"), "live.pdf");
 
         // An upload that died after storing its bytes but before recording them: bytes plus a pending entry.
-        var abandonedKey = $"{_tenantId}/documents/ab/abandoned.pdf";
+        var abandonedKey = $"{_tenantId}/ab/abandoned";
         using (var scope = _factory.Services.CreateScope())
         {
             var storage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
@@ -315,7 +322,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var uploaded = await response.Content.ReadFromJsonAsync<UploadResponse>();
         Assert.Equal(contentType, uploaded!.ContentType);
-        Assert.StartsWith($"{_tenantId}/documents/", await StoragePathAsync(uploaded.Id));
+        var hex = uploaded.Id.ToString("N");
+        Assert.Equal($"{_tenantId}/{hex[..2]}/{hex}", await StoragePathAsync(uploaded.Id)); // nothing about the type
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
     }
 
@@ -327,7 +335,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Same storage root and key template as the other tests, with a limit of 3 files a minute.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
         using var client = Client(factory);
         var batch = $"/api/v1/files/batch";
@@ -356,7 +364,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // A limit of 3 files a minute shows that a replayed retry doesn't count as another file.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
         using var client = Client(factory);
         var single = $"/api/v1/files";
@@ -402,7 +410,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = Client(_factory);
         byte[] Pdf(string text) => Encoding.UTF8.GetBytes("%PDF-1.7 " + text);
         var altered = await UploadAsync(client, Pdf("altered"), "altered.pdf");
-        var grown = await UploadAsync(client, Pdf("grown"), "grown.pdf");
+        var resized = await UploadAsync(client, Pdf("resized"), "resized.pdf");
+        var mismatched = await UploadAsync(client, Pdf("mismatched"), "mismatched.pdf");
         var lost = await UploadAsync(client, Pdf("lost"), "lost.pdf");
 
         // A file recorded without a checksum (as files were before checksums were kept).
@@ -410,14 +419,18 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var legacy = await UploadAsync(client, legacyBytes, "legacy.pdf");
         using (var scope = _factory.Services.CreateScope())
         {
-            await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Set<StoredFile>()
-                .Where(x => x.Id == legacy.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Checksum, (string?)null));
+            var files = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Set<StoredFile>();
+            await files.Where(x => x.Id == legacy.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Checksum, (string?)null));
+            // Records that no longer agree with their bytes: a different size, a different checksum.
+            await files.Where(x => x.Id == resized.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Size, x => x.Size + 1));
+            await files.Where(x => x.Id == mismatched.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Checksum, new string('0', 64)));
         }
 
-        // Damage three files on disk: same size but different bytes, extra bytes, gone.
+        // Damage two files on disk: bytes changed (encrypted, they no longer decrypt), and gone.
         var alteredPath = Path.Combine(_root, await StoragePathAsync(altered.Id));
-        await File.WriteAllBytesAsync(alteredPath, Pdf("ALTERED"));
-        await File.AppendAllTextAsync(Path.Combine(_root, await StoragePathAsync(grown.Id)), "more");
+        var alteredBytes = await File.ReadAllBytesAsync(alteredPath);
+        alteredBytes[^1] ^= 1;
+        await File.WriteAllBytesAsync(alteredPath, alteredBytes);
         File.Delete(Path.Combine(_root, await StoragePathAsync(lost.Id)));
 
         await RunIntegrityJobAsync();
@@ -428,12 +441,13 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(legacyBytes)), legacyDetails.Checksum);
         Assert.Null(legacyDetails.IntegrityProblem);
         Assert.NotNull(legacyDetails.VerifiedAtUtc);
-        Assert.Contains("checksum", (await Details(altered.Id)).IntegrityProblem);
-        Assert.Contains("bytes, not the", (await Details(grown.Id)).IntegrityProblem);
+        Assert.Contains("decryption", (await Details(altered.Id)).IntegrityProblem);
+        Assert.Contains("bytes, not the", (await Details(resized.Id)).IntegrityProblem);
+        Assert.Contains("checksum", (await Details(mismatched.Id)).IntegrityProblem);
         Assert.Contains("missing", (await Details(lost.Id)).IntegrityProblem);
 
         // The list finds them.
-        Assert.Equal(new[] { altered.Id, grown.Id, lost.Id }.Order(),
+        Assert.Equal(new[] { altered.Id, resized.Id, mismatched.Id, lost.Id }.Order(),
             (await ListAsync(client, $"integrityProblem=true")).Select(f => f.Id).Order());
         Assert.Equal([legacy.Id], (await ListAsync(client, $"integrityProblem=false")).Select(f => f.Id));
     }
@@ -482,7 +496,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
             .WithConfig("Quotas:BytesPerTenant", "40");
         using var client = Client(factory);
         byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
@@ -537,7 +551,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var bodyRead = new BodyReadCounter();
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
             .WithConfig("FileStorage:MaxFileSize", limit.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .WithServices(services => services.AddSingleton<IStartupFilter>(bodyRead));
         using var client = Client(factory);

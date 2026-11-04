@@ -59,10 +59,10 @@ public class UploadFileCommandHandler(
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // The caller's tenant: recorded on the file, and offered to the key template ({meta:tenantId}) and the stored
-        // object's metadata. The uploader is recorded by the audit columns (CreatedBy).
+        // The caller's tenant, recorded on the file (the uploader is the audit column CreatedBy). Neither goes to
+        // storage: the stored object carries nothing that identifies it.
         var tenantId = actor.TenantOrShared();
-        var metadata = new Dictionary<string, string> { [StoredFileMetadataNames.TenantId] = tenantId };
+        var metadata = new Dictionary<string, string>();
 
         // The file's id, and where its bytes go: a path from FileStorage:KeyTemplate built on that id, so the stored
         // object is named after the file. It's needed before the upload (it's queued first), so it's built from the
