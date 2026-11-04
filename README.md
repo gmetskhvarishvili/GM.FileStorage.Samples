@@ -97,9 +97,16 @@ flowchart LR
   to use it); the client sends the bytes straight to S3 or Azure, then completes the upload. The API checks the stored
   object (size, and its first bytes against the declared type) before recording it, and deletes what doesn't match.
   On local disk the link is signed and the API's `/files` takes the PUT. Not available with encryption at rest.
-- **Ready to scale out.** With `Redis:ConnectionString` set, the gateway's limits, the per-client file count and the
-  worker's job lock live in Redis, shared by every instance (compose runs Redis and two workers). Without it each
-  service keeps them in memory, which suits one instance.
+- **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
+  runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
+  nothing and counts no file. That covers a single upload, a batch, starting a direct upload and completing one. Only
+  successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
+  while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
+  the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the
+  sample only lengthens `Idempotency:LockExpiry` to 10 minutes so a slow upload keeps its key locked.
+- **Ready to scale out.** With `Redis:ConnectionString` set, the gateway's limits, the per-client file count,
+  idempotency keys and the worker's job lock live in Redis, shared by every instance (compose runs Redis and two
+  workers). Without it each service keeps them in memory, which suits one instance.
 - **Integrity checks.** Every 5 minutes the worker reads a batch of stored files back (decrypted when encryption is
   on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
   as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
@@ -344,7 +351,8 @@ per file, a refused file not stopping the rest), the single endpoint refusing se
 the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
 uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
-per-client file count refusing a batch whole, and `PUT` on a file's content being refused (405). They need PostgreSQL and
+per-client file count refusing a batch whole, retries with an `Idempotency-Key` storing and counting a file once, and
+`PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

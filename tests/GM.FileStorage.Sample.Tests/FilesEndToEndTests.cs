@@ -436,6 +436,62 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Retried_uploads_with_the_same_idempotency_key_are_stored_once()
+    {
+        if (!_infraReady) return;
+
+        // A limit of 4 files a minute shows that a replayed retry doesn't count as another file.
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "4");
+        using var client = factory.CreateClient();
+        var single = $"/api/v1/files?tenantId={_tenantId}";
+        async Task<HttpResponseMessage> WithKey(string key, Func<HttpClient, Task<HttpResponseMessage>> send)
+        {
+            client.DefaultRequestHeaders.Remove("Idempotency-Key");
+            client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+            try { return await send(client); }
+            finally { client.DefaultRequestHeaders.Remove("Idempotency-Key"); }
+        }
+        Task<HttpResponseMessage> Pdf(HttpClient c, string name) =>
+            SendFileAsync(c, HttpMethod.Post, single, Encoding.UTF8.GetBytes("%PDF-1.7 " + name), name, "application/pdf");
+
+        // The retry gets the first answer back, marked as replayed; one file is stored. The key alone decides, so even
+        // a different file under the same key gets that answer.
+        var key = Guid.NewGuid().ToString();
+        var first = await ExpectOkAsync(WithKey(key, c => Pdf(c, "a.pdf")));
+        var retry = await WithKey(key, c => Pdf(c, "a.pdf"));
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal("true", Assert.Single(retry.Headers.GetValues("Idempotency-Replayed")));
+        Assert.Equal(first.Id, (await retry.Content.ReadFromJsonAsync<UploadResponse>())!.Id);
+        Assert.Equal(first.Id, (await ExpectOkAsync(WithKey(key, c => Pdf(c, "other.pdf")))).Id);
+        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Single(StoredObjects());
+
+        // A refusal isn't remembered: the same key with a fixed file is a new upload.
+        var fixedKey = Guid.NewGuid().ToString();
+        Assert.Equal(HttpStatusCode.BadRequest, (await WithKey(fixedKey, c =>
+            SendFileAsync(c, HttpMethod.Post, single, Encoding.UTF8.GetBytes("<html></html>"), "b.html", "text/html"))).StatusCode);
+        var second = await ExpectOkAsync(WithKey(fixedKey, c => Pdf(c, "b.pdf")));
+        Assert.NotEqual(first.Id, second.Id);
+
+        // Completing a direct upload again replays the file instead of 404.
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 direct");
+        var started = await StartDirectUploadAsync(client, "c.pdf", "application/pdf", bytes.Length);
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, bytes)).StatusCode);
+        var completeKey = Guid.NewGuid().ToString();
+        var complete = $"/api/v1/files/direct-uploads/{started.UploadId}/complete";
+        var completed = await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)));
+        Assert.Equal(completed.Id, (await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)))).Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(complete, null)).StatusCode);
+
+        // Three files stored and one refused: four permits used, however many retries.
+        Assert.Equal(3, (await ListAsync(client, $"tenantId={_tenantId}")).Count);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await Pdf(client, "d.pdf")).StatusCode);
+    }
+
+    [Fact]
     public async Task Integrity_checks_record_missing_checksums_and_flag_damaged_files()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable

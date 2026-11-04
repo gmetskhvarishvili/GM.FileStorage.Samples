@@ -86,6 +86,11 @@ flowchart TD
 
 Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
 
+To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
+a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
+first is still running gets `409`, and a retry after a refusal runs again. The same holds for batch uploads and for
+starting and completing direct uploads.
+
 The file streams from the request straight into storage; nothing is buffered first. So a file over the size limit
 (50 MB) is refused as soon as it passes the limit, not after the whole upload. It also means a second file is only
 seen after the first is stored: the first is then discarded (rows and bytes, not a soft delete) and nothing is kept.

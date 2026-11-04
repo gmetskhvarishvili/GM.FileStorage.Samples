@@ -15,6 +15,7 @@ using GM.HealthChecks.EntityFramework;
 using GM.Scheduling;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace GM.FileStorage.Sample.Infrastructure;
 
@@ -88,6 +89,10 @@ public static class DependencyInjection
             return false;
         }
 
+        // GM.API registers in-memory ones first (it looks for ConnectionStrings:Redis, not this section), and these
+        // registrations only fill gaps, so remove those before adding Redis.
+        services.RemoveAll<ICacheService>();
+        services.RemoveAll<IDistributedLock>();
         services.AddGMRedisCaching(configuration);
         services.AddGMRedisDistributedLock(configuration);
         return true;
