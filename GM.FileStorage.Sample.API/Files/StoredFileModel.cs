@@ -36,4 +36,8 @@ public class StoredFileModel : AuditableModel
     /// <summary>The metadata the file was uploaded with (tenantId, userId, …).</summary>
     [Display(ResourceType = typeof(StringResource), Name = "Metadata")]
     public IReadOnlyDictionary<string, string>? Metadata { get; set; }
+    /// <summary>When the stored bytes were last checked against this record (UTC); null until the first check.</summary>
+    public DateTime? VerifiedAtUtc { get; set; }
+    /// <summary>What that check found wrong (missing, wrong size, checksum mismatch); null when the bytes matched.</summary>
+    public string? IntegrityProblem { get; set; }
 }

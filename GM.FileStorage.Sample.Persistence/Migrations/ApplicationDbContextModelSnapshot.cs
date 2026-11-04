@@ -236,11 +236,20 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
 
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at_utc");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)")
                         .HasColumnName("file_name");
+
+                    b.Property<string>("IntegrityProblem")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("integrity_problem");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -286,8 +295,15 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("uploaded_at_utc");
 
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at_utc");
+
                     b.HasKey("Id")
                         .HasName("pk_stored_files");
+
+                    b.HasIndex("DeletedAtUtc")
+                        .HasDatabaseName("ix_stored_files_deleted_at_utc");
 
                     b.HasIndex("Key")
                         .IsUnique()
@@ -299,6 +315,9 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
 
                     b.HasIndex("UploadedAtUtc")
                         .HasDatabaseName("ix_stored_files_uploaded_at_utc");
+
+                    b.HasIndex("VerifiedAtUtc")
+                        .HasDatabaseName("ix_stored_files_verified_at_utc");
 
                     b.ToTable("stored_files", "file_storage");
                 });

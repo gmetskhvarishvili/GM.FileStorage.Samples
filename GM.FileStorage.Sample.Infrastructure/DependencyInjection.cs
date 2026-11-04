@@ -49,18 +49,23 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// The worker: file storage plus the scheduled <see cref="StorageCleanupJob"/>, which deletes whatever bytes
-    /// uploads leave unreferenced (crashes and failures between storing the bytes and recording them). It only deletes objects, so it needs
-    /// no encryption keys. It must see the same storage as the API (same FileStorage settings and root).
+    /// The worker: file storage plus the scheduled jobs. <see cref="StorageCleanupJob"/> deletes whatever bytes uploads
+    /// leave unreferenced; <see cref="IntegrityCheckJob"/> reads stored files back against the catalog;
+    /// <see cref="RetentionJob"/> purges files deleted long ago. The integrity check reads file contents, so the worker
+    /// needs the same encryption settings and keys as the API, and must see the same storage (FileStorage settings and
+    /// root).
     /// </summary>
     public static IServiceCollection AddWorkerInfrastructure(
         this IServiceCollection services, IConfiguration configuration)
     {
         AddFileStorage(services, configuration);
+        services.AddGMFileStorageEncryption(configuration);
 
         // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
         // configured) so several workers never clean at the same time.
         AddCoordination(services, configuration);
+        services.Configure<IntegrityOptions>(configuration.GetSection("Integrity"));
+        services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
         services.AddGMScheduling(builder => builder.ScanAssemblies(typeof(StorageCleanupJob).Assembly));
 
         return services;

@@ -436,6 +436,84 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Integrity_checks_record_missing_checksums_and_flag_damaged_files()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = _factory.CreateClient();
+        byte[] Pdf(string text) => Encoding.UTF8.GetBytes("%PDF-1.7 " + text);
+        var altered = await UploadAsync(client, Pdf("altered"), "altered.pdf", "userId=u1");
+        var grown = await UploadAsync(client, Pdf("grown"), "grown.pdf", "userId=u1");
+        var lost = await UploadAsync(client, Pdf("lost"), "lost.pdf", "userId=u1");
+
+        // A direct upload is recorded without a checksum: the API never read its bytes.
+        var directBytes = Pdf("direct upload");
+        var started = await StartDirectUploadAsync(client, "direct.pdf", "application/pdf", directBytes.Length);
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, directBytes)).StatusCode);
+        var direct = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
+        Assert.Null(direct.Checksum);
+
+        // Damage three files on disk: same size but different bytes, extra bytes, gone.
+        var alteredPath = Path.Combine(_root, await StoragePathAsync(altered.Id));
+        await File.WriteAllBytesAsync(alteredPath, Pdf("ALTERED"));
+        await File.AppendAllTextAsync(Path.Combine(_root, await StoragePathAsync(grown.Id)), "more");
+        File.Delete(Path.Combine(_root, await StoragePathAsync(lost.Id)));
+
+        await RunIntegrityJobAsync();
+
+        async Task<DetailsResponse> Details(Guid id) =>
+            (await client.GetFromJsonAsync<DetailsResponse>($"/api/v1/files/{id}"))!;
+        var directDetails = await Details(direct.Id);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(directBytes)), directDetails.Checksum);
+        Assert.Null(directDetails.IntegrityProblem);
+        Assert.NotNull(directDetails.VerifiedAtUtc);
+        Assert.Contains("checksum", (await Details(altered.Id)).IntegrityProblem);
+        Assert.Contains("bytes, not the", (await Details(grown.Id)).IntegrityProblem);
+        Assert.Contains("missing", (await Details(lost.Id)).IntegrityProblem);
+
+        // The list finds them.
+        Assert.Equal(new[] { altered.Id, grown.Id, lost.Id }.Order(),
+            (await ListAsync(client, $"tenantId={_tenantId}&integrityProblem=true")).Select(f => f.Id).Order());
+        Assert.Equal([direct.Id], (await ListAsync(client, $"tenantId={_tenantId}&integrityProblem=false")).Select(f => f.Id));
+    }
+
+    [Fact]
+    public async Task Retention_purges_files_deleted_too_long_ago_and_keeps_the_rest_restorable()
+    {
+        if (!_infraReady) return;
+
+        using var client = _factory.CreateClient();
+        var old = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 old"), "old.pdf", "userId=u1");
+        var recent = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 recent"), "recent.pdf", "userId=u1");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{old.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{recent.Id}")).StatusCode);
+
+        // One deleted 40 days ago, the other just now; retention keeps deleted files for 30 days.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Assert.NotNull(await context.Set<StoredFile>().Where(x => x.Id == recent.Id).Select(x => x.DeletedAtUtc).SingleAsync());
+            await context.Set<StoredFile>().Where(x => x.Id == old.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.DeletedAtUtc, DateTime.UtcNow.AddDays(-40)));
+        }
+
+        var job = new RetentionJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new RetentionOptions { DeletedFileDays = 30 }));
+        var result = await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
+
+        // The old one is gone for good, bytes included; the recent one can still be restored.
+        Assert.Equal(1, result.ProcessedCount);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{old.Id}?visibility=All")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{old.Id}/restore", null)).StatusCode);
+        Assert.Single(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{recent.Id}/restore", null)).StatusCode);
+        using var after = _factory.Services.CreateScope();
+        Assert.Null(await after.ServiceProvider.GetRequiredService<ApplicationDbContext>()
+            .Set<StoredFile>().Where(x => x.Id == recent.Id).Select(x => x.DeletedAtUtc).SingleAsync());
+    }
+
+    [Fact]
     public async Task Large_uploads_are_streamed_into_storage_intact()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
@@ -699,6 +777,17 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             }
         }
     }
+
+    // Checks this test's files only: the database is shared with whatever else is in it.
+    private async Task RunIntegrityJobAsync()
+    {
+        var job = new IntegrityCheckJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new IntegrityOptions { BatchSize = 100 }),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<IntegrityCheckJob>.Instance);
+        await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
+    }
+
+    private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
 
     private sealed record PresignedResponse(Uri Url, DateTime ExpiresAtUtc);
 

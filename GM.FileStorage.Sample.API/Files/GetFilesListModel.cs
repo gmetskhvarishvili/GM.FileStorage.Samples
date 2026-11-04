@@ -28,6 +28,8 @@ public class GetFilesListModel : GetBaseListModel
     /// <summary>Only files of this MIME type.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "ContentType")]
     public string? ContentType { get; set; }
+    /// <summary>Only files whose last integrity check found a problem (true), or none (false).</summary>
+    public bool? IntegrityProblem { get; set; }
 }
 
 /// <inheritdoc />

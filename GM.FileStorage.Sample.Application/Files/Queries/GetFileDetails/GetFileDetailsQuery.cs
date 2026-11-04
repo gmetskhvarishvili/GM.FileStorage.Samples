@@ -64,4 +64,10 @@ public class StoredFileDetailsDto : AuditableDto
     public bool IsPublic { get; set; }
     public DateTime UploadedAtUtc { get; set; }
     public IReadOnlyDictionary<string, string>? Metadata { get; set; }
+
+    /// <summary>When the stored bytes were last checked against this record (UTC).</summary>
+    public DateTime? VerifiedAtUtc { get; set; }
+
+    /// <summary>What the last check found wrong with the stored bytes; null when they matched.</summary>
+    public string? IntegrityProblem { get; set; }
 }

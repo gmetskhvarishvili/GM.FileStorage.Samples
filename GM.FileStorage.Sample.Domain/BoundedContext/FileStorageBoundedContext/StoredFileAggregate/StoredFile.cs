@@ -28,6 +28,39 @@ public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggrega
         DateTime uploadedAtUtc)
         : base(id, id.ToString(), storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc) { }
 
+    public const int IntegrityProblemMaxLength = 256;
+
+    /// <summary>When the file was deleted (UTC); null while it's live. Retention purges files deleted long enough ago.</summary>
+    public DateTime? DeletedAtUtc { get; private set; }
+
+    /// <summary>When the stored bytes were last checked against this record (UTC); null until the first check.</summary>
+    public DateTime? VerifiedAtUtc { get; private set; }
+
+    /// <summary>What the last check found wrong with the stored bytes (missing, wrong size, checksum mismatch); null when they matched.</summary>
+    public string? IntegrityProblem { get; private set; }
+
+    public override void SoftRemove()
+    {
+        base.SoftRemove();
+        DeletedAtUtc = DateTime.UtcNow;
+    }
+
+    public override void RestoreAll()
+    {
+        base.RestoreAll();
+        DeletedAtUtc = null;
+    }
+
+    /// <summary>Records a check of the stored bytes: when, and what was wrong (null when they matched).</summary>
+    public void RecordVerification(DateTime verifiedAtUtc, string? problem)
+    {
+        if (problem is { Length: > IntegrityProblemMaxLength })
+            problem = problem[..IntegrityProblemMaxLength];
+
+        VerifiedAtUtc = DateTime.SpecifyKind(verifiedAtUtc, DateTimeKind.Utc);
+        IntegrityProblem = problem;
+    }
+
     /// <summary>Records a file, identified by <paramref name="id"/>, whose bytes were just stored at <paramref name="storageKey"/>.</summary>
     public static StoredFile Create(
         Guid id,
