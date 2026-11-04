@@ -1,0 +1,26 @@
+meta {
+  name: Download File
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{gateway}}/api/v1/files/{{fileId}}/content
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("streams the PDF", function () {
+    expect(res.getHeader("content-type")).to.contain("application/pdf");
+    expect(res.getHeader("accept-ranges")).to.equal("bytes");
+  });
+}
+
+docs {
+  The whole file, streamed from storage.
+}

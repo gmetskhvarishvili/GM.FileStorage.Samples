@@ -17,7 +17,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | Download | `GET /api/v1/files/{id}/content` | [Download — user flow](user-flows.md#download--user-flow) | [Download — sequence](sequence-diagrams.md#download--sequence) |
 | Delete | `DELETE /api/v1/files/{id}` | [Delete — user flow](user-flows.md#delete--user-flow) | [Delete — sequence](sequence-diagrams.md#delete--sequence) |
 | Restore | `POST /api/v1/files/{id}/restore` | [Restore — user flow](user-flows.md#restore--user-flow) | [Restore — sequence](sequence-diagrams.md#restore--sequence) |
-| Presign | `GET /api/v1/files/{id}/presign` | [Presign — user flow](user-flows.md#presign--user-flow) | [Presign — sequence](sequence-diagrams.md#presign--sequence) |
 
 ## By doc
 
@@ -27,7 +26,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- |
 | [System architecture — flowchart](architecture.md#system-architecture--flowchart) | Gateway, API and worker, and what each talks to |
 | [Layers — dependency graph](architecture.md#layers--dependency-graph) | Which layer each host uses |
-| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files` (with `tenant_id`), `stored_file_metadata` (unused), `storage_cleanups` |
+| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files` (with `tenant_id`), `storage_cleanups` |
 
 ### [Dependencies](dependencies.md)
 
@@ -53,7 +52,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Download — user flow](user-flows.md#download--user-flow) | Whole file or a range, 200 / 206 / 404 / 416 |
 | [Delete — user flow](user-flows.md#delete--user-flow) | Soft delete, 204 / 404 |
 | [Restore — user flow](user-flows.md#restore--user-flow) | Bytes still there, 204 / 404 |
-| [Presign — user flow](user-flows.md#presign--user-flow) | When a link is possible, and serving a signed local-disk link (403 / 404) |
 | [Typical session — user journey](user-flows.md#typical-session--user-journey) | One document from upload to restore |
 
 ### [Sequence diagrams](sequence-diagrams.md)
@@ -69,7 +67,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Download — sequence](sequence-diagrams.md#download--sequence) | Ranges, missing bytes, 206 / 416 |
 | [Delete — sequence](sequence-diagrams.md#delete--sequence) | Soft remove, bytes untouched |
 | [Restore — sequence](sequence-diagrams.md#restore--sequence) | Bytes check, restore |
-| [Presign — sequence](sequence-diagrams.md#presign--sequence) | Signing, or why it can't, and serving a local-disk link |
 | [Encryption at rest — sequence](sequence-diagrams.md#encryption-at-rest--sequence) | Per-file key, chunked AES-GCM, ranged decryption |
 | [Storage cleanup — sequence](sequence-diagrams.md#storage-cleanup--sequence) | The worker's lock, claim, delete, back-off |
 | [Integrity check — sequence](sequence-diagrams.md#integrity-check--sequence) | Reading stored bytes back: missing, wrong size, checksum mismatch, checksums filled in |

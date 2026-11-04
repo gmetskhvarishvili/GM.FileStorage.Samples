@@ -78,17 +78,6 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -H "X-Tenant-Id: $(cat /proc/sys/kernel/random/uuid)" "http://localhost:8080/api/v1/files/$id/content")" = 404
           curl -sf http://localhost:8080/swagger/v1/swagger.json | jq -e '.paths | has("/api/v1/files/batch")'
 
-      - name: Presigned link through the gateway
-        env:
-          T: "X-Tenant-Id: 0c1f6a52-3b8e-4d7a-9f20-6e5b1c4d8a01"
-        run: |
-          id=$(curl -sf -H "$T" "http://localhost:8080/api/v1/files" | jq -r '.[0].id')
-          link=$(curl -sf -H "$T" "http://localhost:8080/api/v1/files/$id/presign" | jq -r .url)
-          echo "link $link"
-          curl -sf -o linked.pdf "$link"
-          cmp smoke.pdf linked.pdf
-          test "$(curl -s -o /dev/null -w '%{http_code}' "${link%%&sig=*}")" = 403
-
       - name: The API and the workers share the storage volume and Redis
         run: |
           docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .

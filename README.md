@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
-keys organised by file type, delete and presigned links through the
+keys organised by file type and delete through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
 metadata, so each tenant's files can be listed, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
@@ -59,9 +59,9 @@ flowchart LR
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, content type, paging), `IUnitOfWork` |
-| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
-| `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` and `StorageCleanup` aggregates (`StoredFile` specialises GM.FileStorage's `GMStoredFile<TStoredFile>`, adding its tenant), repository interfaces, `StoredFileSpecification` (visibility, tenant, uploader, content type, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
+| `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
 | `GM.FileStorage.Sample.API` | GM.API host; `Files/FilesController` sends mediator requests and maps its `*Model`s with Mapster |
@@ -114,8 +114,8 @@ flowchart LR
   `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
-- **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
-  and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
+- **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details and
+  download; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
@@ -128,8 +128,8 @@ flowchart LR
 - **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
   column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
   filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
-  GM.FileStorage's name/value metadata table (`stored_file_metadata`) is still mapped but left empty: it's for
-  labels that vary from file to file, which this sample doesn't take.
+  There's no metadata table: GM.FileStorage's name/value metadata (`GMStoredFile<TStoredFile, TStoredFileMetadata>`)
+  is for labels that vary from file to file, which this sample doesn't take.
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -219,8 +219,7 @@ the key means losing every file it encrypted.
 
 With it on, every file is encrypted with its own AES-256-GCM key, wrapped by the master key
 (`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Over HTTP nothing changes:
-uploads, downloads and range requests work as before. The exception is presign, which returns a 400,
-because a direct link would serve ciphertext.
+uploads, downloads and range requests work as before.
 
 ## Endpoints
 
@@ -234,8 +233,6 @@ because a direct link would serve ciphertext.
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
-| `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
-| `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
@@ -327,6 +324,20 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 
   Alternatively, keep them in the secrets store named by `SECRETS_PROVIDER`.
 
+## Trying it with Bruno
+
+[`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, through the gateway. Open the
+folder in Bruno, pick the **Local** environment (gateway, API, tenant and user), and run **Files** in order: Upload
+File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key` (replayed), sends a batch
+and a refused type, then lists, reads, downloads a range, checks usage, tries the file as another tenant (404),
+deletes and restores. **Health** checks both services. Every request has tests, so the whole run doubles as a smoke
+test:
+
+```bash
+cd bruno
+npx @usebruno/cli run Files Health --env Local --insecure   # --insecure: the local dev certificate
+```
+
 ## Running in Docker
 
 `docker-compose.yml` runs the whole sample: PostgreSQL, Redis, the API, two workers and the gateway, built from the
@@ -351,10 +362,10 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
 against a throwaway storage root and drive it over HTTP: upload (stored under its own id) → list by user → details →
-download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
+download → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
-the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), integrity checks flagging damaged or
+the upload rules, the cleanup job, integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
 `PUT` on a file's content being refused (405). They need PostgreSQL and

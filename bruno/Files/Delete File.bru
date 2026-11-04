@@ -1,0 +1,21 @@
+meta {
+  name: Delete File
+  type: http
+  seq: 11
+}
+
+delete {
+  url: {{gateway}}/api/v1/files/{{fileId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("returns 204", function () {
+    expect(res.getStatus()).to.equal(204);
+  });
+}
+
+docs {
+  Marks the file deleted; its bytes are kept, so it can be restored (until retention purges it).
+}

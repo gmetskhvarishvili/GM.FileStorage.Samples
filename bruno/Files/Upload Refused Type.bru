@@ -1,0 +1,25 @@
+meta {
+  name: Upload Refused Type
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{gateway}}/api/v1/files
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(sample-files/notes.txt)
+}
+
+tests {
+  test("returns 400", function () {
+    expect(res.getStatus()).to.equal(400);
+  });
+}
+
+docs {
+  Plain text isn't in FileStorage:AllowedContentTypes, so it's refused with the reason and nothing is kept.
+}

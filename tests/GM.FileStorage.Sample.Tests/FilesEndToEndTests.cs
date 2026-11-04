@@ -1,6 +1,5 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
@@ -86,7 +85,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var fileIds = await OurFiles(context).Select(x => x.Id).ToListAsync();
-                await context.Set<StoredFileMetadata>().Where(x => fileIds.Contains(x.StoredFileId)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => fileIds.Contains(x.Id)).ExecuteDeleteAsync();
                 await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(_tenantId)).ExecuteDeleteAsync();
             }
@@ -128,9 +126,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(("passport.pdf", "application/pdf"), (details.FileName, details.ContentType));
         Assert.False(details.IsDeleted);
 
-        // Download: byte-for-byte; presign: a link.
+        // Download: byte-for-byte.
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/presign")).StatusCode);
 
         // Delete: only marks the row deleted (hidden from list, details, download); the bytes stay for a restore,
         // and nothing is queued for cleanup — even when the job runs.
@@ -149,13 +146,12 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
 
-        // Still one row (and no metadata rows), one stored object, and nothing queued.
+        // Still one row, one stored object, and nothing queued.
         Assert.Single(StoredObjects());
         Assert.Empty(await CleanupEntriesAsync());
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Id == uploaded.Id));
-        Assert.Equal(0, await context.Set<StoredFileMetadata>().CountAsync(x => x.StoredFileId == uploaded.Id));
     }
 
     [Fact]
@@ -220,7 +216,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{id}/content")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{id}/presign")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/v1/files/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{id}/restore", null)).StatusCode);
     }
@@ -242,7 +237,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}?visibility=All")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/content")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/presign")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.DeleteAsync($"/api/v1/files/{ours.Id}")).StatusCode);
 
         // Nor can it restore what we deleted.
@@ -321,45 +315,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(contentType, uploaded!.ContentType);
         Assert.StartsWith($"{_tenantId}/documents/", await StoragePathAsync(uploaded.Id));
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
-    }
-
-    [Fact]
-    public async Task Presigned_links_serve_the_file_until_altered_or_deleted()
-    {
-        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
-
-        using var client = Client(_factory);
-        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 shared by link");
-        var uploaded = await UploadAsync(client, bytes, "shared.pdf");
-
-        var presigned = await client.GetFromJsonAsync<PresignedResponse>($"/api/v1/files/{uploaded.Id}/presign");
-        Assert.NotNull(presigned);
-        // The link points at the gateway (PublicBaseUrl); its path and query are what reach this API.
-        var link = presigned.Url.PathAndQuery;
-        Assert.StartsWith($"/files/{_tenantId}/documents/", link);
-        Assert.Contains("&sig=", link);
-
-        // Anyone holding the link gets the file, no other credentials needed.
-        var served = await client.GetAsync(link);
-        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
-        Assert.Equal(bytes, await served.Content.ReadAsByteArrayAsync());
-        Assert.Equal("shared.pdf", served.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
-
-        // An altered link is refused: another signature, a later expiry, no signature, another operation.
-        var sig = link[(link.IndexOf("&sig=", StringComparison.Ordinal) + 5)..];
-        var forged = link.Replace(sig, new string('0', sig.Length), StringComparison.Ordinal);
-        var expires = link.Split('?')[1].Split('&').Single(p => p.StartsWith("expires=", StringComparison.Ordinal));
-        var extended = link.Replace(expires, $"expires={long.Parse(expires[8..], System.Globalization.CultureInfo.InvariantCulture) + 3600}", StringComparison.Ordinal);
-        var unsigned = link[..link.IndexOf("&sig=", StringComparison.Ordinal)];
-        var write = link.Replace("op=read", "op=write", StringComparison.Ordinal);
-        foreach (var altered in new[] { forged, extended, unsigned, write })
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(altered)).StatusCode);
-
-        // Deleting the file stops the link, though the bytes are kept; restoring brings it back.
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(link)).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(link)).StatusCode);
     }
 
     [Fact]
@@ -829,7 +784,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
 
-    private sealed record PresignedResponse(Uri Url, DateTime ExpiresAtUtc);
 
 
     private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);

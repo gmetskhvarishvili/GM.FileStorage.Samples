@@ -29,7 +29,7 @@ flowchart LR
     gw -->|forwards requests| api
     gw -->|readiness: GET /health/live| api
     api -->|catalog, cleanup queue, domain events| pg
-    api -->|upload, download, exists, delete, presign| store
+    api -->|upload, download, exists, delete| store
     worker -->|cleanup queue, file rows| pg
     worker -->|delete| store
     secrets -.->|connection string, cloud credentials, master keys| api
@@ -160,7 +160,7 @@ flowchart BT
     s3 --> aws[AWSSDK.S3]
     azure --> blobs[Azure.Storage.Blobs]
 
-    fsDomain[GM.FileStorage.Domain<br/>GMStoredFile, GMStoredFileMetadata] --> efDomain[GM.EntityFramework.Domain]
+    fsDomain[GM.FileStorage.Domain<br/>GMStoredFile] --> efDomain[GM.EntityFramework.Domain]
     fsPers[GM.FileStorage.Persistence<br/>EF configurations] --> fsDomain
     fsPers --> efPers[GM.EntityFramework.Persistence]
 ```
@@ -186,7 +186,6 @@ classDiagram
         +DownloadFile()
         +DeleteFile()
         +RestoreFile()
-        +PresignFile()
     }
     class IMediator
     class UploadFileCommandHandler
@@ -200,11 +199,9 @@ classDiagram
     class GetFilesListQueryHandler
     class GetFileDetailsQueryHandler
     class DownloadFileQueryHandler
-    class GetFilePresignedUrlQueryHandler
 
     class IUnitOfWork {
         +StoredFileRepository
-        +StoredFileMetadataRepository
         +StorageCleanupRepository
         +SaveChangesAsync()
     }
@@ -213,7 +210,6 @@ classDiagram
         +DownloadAsync()
         +ExistsAsync()
         +DeleteAsync()
-        +GetPresignedUrlAsync()
     }
     class IFileKeyStrategy {
         +GenerateKey()
@@ -233,7 +229,6 @@ classDiagram
     IMediator ..> GetFilesListQueryHandler
     IMediator ..> GetFileDetailsQueryHandler
     IMediator ..> DownloadFileQueryHandler
-    IMediator ..> GetFilePresignedUrlQueryHandler
 
     UploadFileCommandHandler --> IUnitOfWork
     UploadFileCommandHandler --> IFileStorageService
@@ -245,8 +240,6 @@ classDiagram
     GetFileDetailsQueryHandler --> IUnitOfWork
     DownloadFileQueryHandler --> IUnitOfWork
     DownloadFileQueryHandler --> IFileStorageService
-    GetFilePresignedUrlQueryHandler --> IUnitOfWork
-    GetFilePresignedUrlQueryHandler --> IFileStorageService
     StorageCleanupJob --> IUnitOfWork
     StorageCleanupJob --> IFileStorageService
 ```
@@ -266,7 +259,7 @@ title: Domain model — class diagram
 classDiagram
     direction TB
 
-    class GMStoredFile~TFile,TMetadata~ {
+    class GMStoredFile~TFile~ {
         <<GM.FileStorage.Domain>>
         +Guid Id
         +string StorageKey
@@ -278,19 +271,9 @@ classDiagram
         +SoftRemove()
         +RestoreAll()
     }
-    class GMStoredFileMetadata~TFile,TMetadata~ {
-        <<GM.FileStorage.Domain>>
-        +Guid StoredFileId
-        +string Name
-        +string Value
-        +ChangeValue()
-    }
     class StoredFile {
         +string TenantId
         +Create(id, storageKey, …, tenantId)$
-    }
-    class StoredFileMetadata {
-        +Create(storedFileId, name, value)$
     }
     class StorageCleanup {
         +string StorageKey
@@ -305,21 +288,14 @@ classDiagram
     class IStoredFileRepository {
         <<interface>>
     }
-    class IStoredFileMetadataRepository {
-        <<interface>>
-    }
     class IStorageCleanupRepository {
         <<interface>>
     }
 
     GMStoredFile <|-- StoredFile
-    GMStoredFileMetadata <|-- StoredFileMetadata
-    StoredFile "1" o-- "*" StoredFileMetadata : Metadata
     IUnitOfWork --> IStoredFileRepository
-    IUnitOfWork --> IStoredFileMetadataRepository
     IUnitOfWork --> IStorageCleanupRepository
     IStoredFileRepository ..> StoredFile
-    IStoredFileMetadataRepository ..> StoredFileMetadata
     IStorageCleanupRepository ..> StorageCleanup
 ```
 

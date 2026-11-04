@@ -1,7 +1,6 @@
 using GM.EntityFramework.Persistence;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Interfaces;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.FileStorage.Sample.Persistence.Repositories;
@@ -30,7 +29,6 @@ public static class DependencyInjection
         });
 
         services.AddTransient<IStoredFileRepository, StoredFileRepository>();
-        services.AddTransient<IStoredFileMetadataRepository, StoredFileMetadataRepository>();
         services.AddTransient<IStorageCleanupRepository, StorageCleanupRepository>();
         services.AddTransient<IUnitOfWork, UnitOfWork.UnitOfWork>();
 

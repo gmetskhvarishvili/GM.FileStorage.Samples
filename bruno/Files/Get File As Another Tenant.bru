@@ -1,0 +1,25 @@
+meta {
+  name: Get File As Another Tenant
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{gateway}}/api/v1/files/{{fileId}}
+  body: none
+  auth: none
+}
+
+headers {
+  X-Tenant-Id: {{otherTenantId}}
+}
+
+tests {
+  test("returns 404", function () {
+    expect(res.getStatus()).to.equal(404);
+  });
+}
+
+docs {
+  Another tenant's file doesn't exist for you: 404, as for an unknown id.
+}

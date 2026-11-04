@@ -1,5 +1,4 @@
 using GM.Exceptions;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using Microsoft.EntityFrameworkCore;
 using System;

@@ -60,7 +60,6 @@ public sealed class GatewayTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files/batch", PdfForm("files"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync("/api/v1/files/6f1e0000-0000-0000-0000-000000000001")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/swagger/v1/swagger.json")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/files/documents/9f/9f1c.pdf?expires=1&op=read&sig=ab")).StatusCode);
 
         // Range requests pass through both ways: the header in, the 206 out.
         using var ranged = new HttpRequestMessage(HttpMethod.Get, "/api/v1/files/6f1e0000-0000-0000-0000-000000000001/content");
@@ -75,7 +74,6 @@ public sealed class GatewayTests : IAsyncLifetime
                 "POST /api/v1/files/batch",
                 "DELETE /api/v1/files/6f1e0000-0000-0000-0000-000000000001",
                 "GET /swagger/v1/swagger.json",
-                "GET /files/documents/9f/9f1c.pdf?expires=1&op=read&sig=ab",
                 "GET /api/v1/files/6f1e0000-0000-0000-0000-000000000001/content",
             ],
             received.Select(r => $"{r.Method} {r.PathAndQuery}"));
@@ -87,6 +85,7 @@ public sealed class GatewayTests : IAsyncLifetime
 
     [Theory]
     [InlineData("GET", "/admin", HttpStatusCode.NotFound)]
+    [InlineData("GET", "/files/documents/9f/9f1c.pdf", HttpStatusCode.NotFound)]
     [InlineData("GET", "/api/v1/users", HttpStatusCode.NotFound)]
     // The docs route matches the path but only for GET.
     [InlineData("POST", "/swagger/v1/swagger.json", HttpStatusCode.MethodNotAllowed)]

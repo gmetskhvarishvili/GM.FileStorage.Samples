@@ -14,7 +14,6 @@ public static class FileStorageTableNames
     }
 
     public const string StoredFiles = "stored_files";
-    public const string StoredFileMetadata = "stored_file_metadata";
 
     /// <summary>The sample's own table: storage objects queued for deletion.</summary>
     public const string StorageCleanups = "storage_cleanups";

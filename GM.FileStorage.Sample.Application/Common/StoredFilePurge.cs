@@ -27,8 +27,6 @@ public static class StoredFilePurge
 
         var idList = ids.ToList();
         var files = await unitOfWork.StoredFileRepository.FindAsync(x => idList.Contains(x.Id), false, null, cancellationToken);
-        var metadata = await unitOfWork.StoredFileMetadataRepository
-            .FindAsync(x => idList.Contains(x.StoredFileId), false, null, cancellationToken);
 
         var cleanups = new List<StorageCleanup>(files.Count);
         foreach (var file in files)
@@ -38,7 +36,6 @@ public static class StoredFilePurge
             cleanups.Add(cleanup);
         }
 
-        unitOfWork.StoredFileMetadataRepository.RemoveRange(metadata);
         unitOfWork.StoredFileRepository.RemoveRange(files);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 

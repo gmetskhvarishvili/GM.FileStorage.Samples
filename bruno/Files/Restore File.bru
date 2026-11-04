@@ -1,0 +1,26 @@
+meta {
+  name: Restore File
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{gateway}}/api/v1/files/{{fileId}}/restore
+  body: json
+  auth: none
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("returns 204", function () {
+    expect(res.getStatus()).to.equal(204);
+  });
+}
+
+docs {
+  Brings the deleted file back as it was; nothing is re-uploaded. The empty JSON body only sets a JSON content
+  type: Bruno would otherwise send a form one, which the API refuses (415).
+}

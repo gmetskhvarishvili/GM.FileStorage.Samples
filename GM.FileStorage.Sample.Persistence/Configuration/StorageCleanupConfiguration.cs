@@ -1,7 +1,6 @@
 using GM.FileStorage.Domain.FileStorage.StoredFileAggregate.Entities;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -17,7 +16,7 @@ public class StorageCleanupConfiguration : IEntityTypeConfiguration<StorageClean
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.StorageKey).IsRequired()
-            .HasMaxLength(GMStoredFile<StoredFile, StoredFileMetadata>.StorageKeyMaxLength);
+            .HasMaxLength(GMStoredFile<StoredFile>.StorageKeyMaxLength);
         // Claiming an entry moves DueAtUtc; as a concurrency token it makes the claim and an upload's own removal
         // of its pending entry mutually exclusive.
         builder.Property(x => x.DueAtUtc).IsRequired().IsConcurrencyToken();

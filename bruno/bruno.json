@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "GM.FileStorage.Samples",
+  "type": "collection",
+  "ignore": ["node_modules", ".git"]
+}
