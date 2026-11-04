@@ -24,9 +24,6 @@ public class StoredFileDetailsModel : AuditableModel
     /// <summary>Content checksum, when the provider computes one.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "Checksum")]
     public string? Checksum { get; set; }
-    /// <summary>Whether the file is publicly readable.</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "IsPublic")]
-    public bool IsPublic { get; set; }
     /// <summary>When the current content was stored (UTC).</summary>
     [Display(ResourceType = typeof(StringResource), Name = "UploadedAtUtc")]
     public DateTime UploadedAtUtc { get; set; }

@@ -115,7 +115,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // List by tenant: exactly this file, with its tenant and uploader and nothing of where it's stored.
         var listed = Assert.Single(await ListAsync(client, ""));
         Assert.Equal(uploaded.Id, listed.Id);
-        Assert.DoesNotContain("storageKey", await client.GetStringAsync("/api/v1/files"), StringComparison.OrdinalIgnoreCase);
+        var listJson = await client.GetStringAsync("/api/v1/files");
+        Assert.DoesNotContain("storageKey", listJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("isPublic", listJson, StringComparison.OrdinalIgnoreCase);
         Assert.Equal((_tenantId, Guid.Parse(_userId)), (listed.TenantId, listed.UploadedBy));
         Assert.Single(await ListAsync(client, $"userId={_userId}"));
         Assert.Empty(await ListAsync(client, $"userId={Guid.NewGuid()}"));
