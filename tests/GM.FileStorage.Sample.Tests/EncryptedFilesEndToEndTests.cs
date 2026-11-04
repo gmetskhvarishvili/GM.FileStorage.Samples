@@ -1,5 +1,4 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
@@ -67,7 +66,6 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
                 var ids = await context.Set<StoredFile>()
                     .Where(f => f.TenantId == _tenantId)
                     .Select(f => f.Id).ToListAsync();
-                await context.Set<StoredFileMetadata>().Where(x => ids.Contains(x.StoredFileId)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();
             }
             catch { /* best-effort cleanup */ }

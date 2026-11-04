@@ -4,7 +4,6 @@ using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using Microsoft.Extensions.Options;
@@ -18,8 +17,8 @@ namespace GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 
 /// <summary>
 /// Stores a new file through <see cref="IFileStorageService"/> and records it in the catalog: a
-/// <see cref="StoredFile"/> row, identified by a new GUID, plus one <see cref="StoredFileMetadata"/> row per metadata
-/// pair, so files can be listed by tenant or user. A stored file's content never changes; new content is a new file.
+/// <see cref="StoredFile"/> row, identified by a new GUID, with the caller's tenant (the uploader is its
+/// <c>CreatedBy</c>), so files can be listed by tenant or user. A stored file's content never changes; new content is a new file.
 /// </summary>
 public class UploadFileCommand : IRequest<UploadedFileDto>
 {

@@ -59,9 +59,9 @@ flowchart LR
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, content type, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` and `StorageCleanup` aggregates (`StoredFile` specialises GM.FileStorage's `GMStoredFile<TStoredFile>`, adding its tenant), repository interfaces, `StoredFileSpecification` (visibility, tenant, uploader, content type, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
-| `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
+| `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
 | `GM.FileStorage.Sample.API` | GM.API host; `Files/FilesController` sends mediator requests and maps its `*Model`s with Mapster |
@@ -128,8 +128,8 @@ flowchart LR
 - **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
   column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
   filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
-  GM.FileStorage's name/value metadata table (`stored_file_metadata`) is still mapped but left empty: it's for
-  labels that vary from file to file, which this sample doesn't take.
+  There's no metadata table: GM.FileStorage's name/value metadata (`GMStoredFile<TStoredFile, TStoredFileMetadata>`)
+  is for labels that vary from file to file, which this sample doesn't take.
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is

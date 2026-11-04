@@ -27,7 +27,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- |
 | [System architecture — flowchart](architecture.md#system-architecture--flowchart) | Gateway, API and worker, and what each talks to |
 | [Layers — dependency graph](architecture.md#layers--dependency-graph) | Which layer each host uses |
-| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files` (with `tenant_id`), `stored_file_metadata` (unused), `storage_cleanups` |
+| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files` (with `tenant_id`), `storage_cleanups` |
 
 ### [Dependencies](dependencies.md)
 

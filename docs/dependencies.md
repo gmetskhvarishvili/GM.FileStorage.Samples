@@ -160,7 +160,7 @@ flowchart BT
     s3 --> aws[AWSSDK.S3]
     azure --> blobs[Azure.Storage.Blobs]
 
-    fsDomain[GM.FileStorage.Domain<br/>GMStoredFile, GMStoredFileMetadata] --> efDomain[GM.EntityFramework.Domain]
+    fsDomain[GM.FileStorage.Domain<br/>GMStoredFile] --> efDomain[GM.EntityFramework.Domain]
     fsPers[GM.FileStorage.Persistence<br/>EF configurations] --> fsDomain
     fsPers --> efPers[GM.EntityFramework.Persistence]
 ```
@@ -204,7 +204,6 @@ classDiagram
 
     class IUnitOfWork {
         +StoredFileRepository
-        +StoredFileMetadataRepository
         +StorageCleanupRepository
         +SaveChangesAsync()
     }
@@ -266,7 +265,7 @@ title: Domain model — class diagram
 classDiagram
     direction TB
 
-    class GMStoredFile~TFile,TMetadata~ {
+    class GMStoredFile~TFile~ {
         <<GM.FileStorage.Domain>>
         +Guid Id
         +string StorageKey
@@ -278,19 +277,9 @@ classDiagram
         +SoftRemove()
         +RestoreAll()
     }
-    class GMStoredFileMetadata~TFile,TMetadata~ {
-        <<GM.FileStorage.Domain>>
-        +Guid StoredFileId
-        +string Name
-        +string Value
-        +ChangeValue()
-    }
     class StoredFile {
         +string TenantId
         +Create(id, storageKey, …, tenantId)$
-    }
-    class StoredFileMetadata {
-        +Create(storedFileId, name, value)$
     }
     class StorageCleanup {
         +string StorageKey
@@ -305,21 +294,14 @@ classDiagram
     class IStoredFileRepository {
         <<interface>>
     }
-    class IStoredFileMetadataRepository {
-        <<interface>>
-    }
     class IStorageCleanupRepository {
         <<interface>>
     }
 
     GMStoredFile <|-- StoredFile
-    GMStoredFileMetadata <|-- StoredFileMetadata
-    StoredFile "1" o-- "*" StoredFileMetadata : Metadata
     IUnitOfWork --> IStoredFileRepository
-    IUnitOfWork --> IStoredFileMetadataRepository
     IUnitOfWork --> IStorageCleanupRepository
     IStoredFileRepository ..> StoredFile
-    IStoredFileMetadataRepository ..> StoredFileMetadata
     IStorageCleanupRepository ..> StorageCleanup
 ```
 

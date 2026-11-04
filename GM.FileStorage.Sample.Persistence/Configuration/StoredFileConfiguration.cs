@@ -1,6 +1,5 @@
 using GM.FileStorage.Persistence.Configuration;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -8,7 +7,7 @@ namespace GM.FileStorage.Sample.Persistence.Configuration;
 
 // The stored-file mapping lives in the GM.FileStorage base config; this fixes it to the sample's
 // aggregate (named by FileStorageTableNames, without GM.FileStorage's gm_ prefix) and adds the sample's own columns.
-public class StoredFileConfiguration : GMStoredFileConfiguration<StoredFile, StoredFileMetadata>
+public class StoredFileConfiguration : GMStoredFileConfiguration<StoredFile>
 {
     protected override string Schema => FileStorageTableNames.Schemas.FileStorage;
     protected override string Table => FileStorageTableNames.StoredFiles;

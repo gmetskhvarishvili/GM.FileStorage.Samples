@@ -1,6 +1,5 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
@@ -86,7 +85,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var fileIds = await OurFiles(context).Select(x => x.Id).ToListAsync();
-                await context.Set<StoredFileMetadata>().Where(x => fileIds.Contains(x.StoredFileId)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => fileIds.Contains(x.Id)).ExecuteDeleteAsync();
                 await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(_tenantId)).ExecuteDeleteAsync();
             }
@@ -149,13 +147,12 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
 
-        // Still one row (and no metadata rows), one stored object, and nothing queued.
+        // Still one row, one stored object, and nothing queued.
         Assert.Single(StoredObjects());
         Assert.Empty(await CleanupEntriesAsync());
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Id == uploaded.Id));
-        Assert.Equal(0, await context.Set<StoredFileMetadata>().CountAsync(x => x.StoredFileId == uploaded.Id));
     }
 
     [Fact]
