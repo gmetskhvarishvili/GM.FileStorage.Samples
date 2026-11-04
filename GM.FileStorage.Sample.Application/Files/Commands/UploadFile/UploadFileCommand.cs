@@ -6,6 +6,7 @@ using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.Stor
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -59,7 +60,8 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// the new bytes are deleted (or left to the job).</item>
 /// </list>
 /// </remarks>
-public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy)
+public class UploadFileCommandHandler(
+    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
@@ -75,6 +77,11 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         // first), so it's built from the declared content type; with FileStorage:VerifyContentType on, a declaration
         // the bytes don't match is rejected by the upload, so the {category} folder can't lie.
         var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType });
+
+        // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
+        // upload has streamed, so it's checked again then).
+        var tenantId = metadata[StoredFileMetadataNames.TenantId];
+        await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, 0, cancellationToken);
 
         // 1. Queue the new storage key before any bytes exist, so a crash after the upload can't strand them.
         var pending = StorageCleanup.Create(storageKey, DateTime.UtcNow.Add(StorageCleanup.PendingUploadGracePeriod));
@@ -103,6 +110,17 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             throw new BadRequestException(ex.Message);
         }
         catch
+        {
+            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            throw;
+        }
+
+        // Now the size is known: over the quota, the bytes go.
+        try
+        {
+            await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, stored.Size, cancellationToken);
+        }
+        catch (BadRequestException)
         {
             await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
             throw;

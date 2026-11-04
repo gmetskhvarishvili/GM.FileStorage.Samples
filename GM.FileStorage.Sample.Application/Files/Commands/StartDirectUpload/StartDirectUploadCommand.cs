@@ -56,7 +56,8 @@ public class StartDirectUploadCommandHandler(
     IFileStorageService storage,
     IFileKeyStrategy keyStrategy,
     IOptions<FileStorageOptions> storageOptions,
-    IOptions<DirectUploadOptions> options)
+    IOptions<DirectUploadOptions> options,
+    IOptions<QuotaOptions> quota)
     : IRequestHandler<StartDirectUploadCommand, DirectUploadDto>
 {
     public async Task<DirectUploadDto> Handle(StartDirectUploadCommand request, CancellationToken cancellationToken)
@@ -69,6 +70,11 @@ public class StartDirectUploadCommandHandler(
 
         var tenantId = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId;
         var userId = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId;
+
+        // The declared size counts against the tenant's quota from now (the pending upload is part of its usage), and
+        // completing it can't go over: the stored object must have exactly that size.
+        await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, request.Size, cancellationToken);
+
         var metadata = new Dictionary<string, string>
         {
             [StoredFileMetadataNames.TenantId] = tenantId,

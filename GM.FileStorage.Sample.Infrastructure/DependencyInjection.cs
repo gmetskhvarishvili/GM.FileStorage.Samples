@@ -34,6 +34,9 @@ public static class DependencyInjection
         // Large files written straight into storage through presigned links (DirectUploads in appsettings.json).
         services.Configure<DirectUploadOptions>(configuration.GetSection("DirectUploads"));
 
+        // Bytes each tenant may store (Quotas:BytesPerTenant).
+        services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
+
         // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json), across instances when
         // Redis is configured: the gateway limits requests, but a batch holds up to 20 files.
         var redis = AddCoordination(services, configuration);

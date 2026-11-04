@@ -514,6 +514,46 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Uploads_stay_within_the_tenants_storage_quota()
+    {
+        if (!_infraReady) return;
+
+        // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("Quotas:BytesPerTenant", "40");
+        using var client = factory.CreateClient();
+        byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
+        async Task<HttpResponseMessage> Upload(int length) =>
+            await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}", Pdf(length), "f.pdf", "application/pdf");
+        async Task<UsageResponse> Usage() => (await client.GetFromJsonAsync<UsageResponse>($"/api/v1/files/usage?tenantId={_tenantId}"))!;
+
+        var first = await Upload(20);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstId = (await first.Content.ReadFromJsonAsync<UploadResponse>())!.Id;
+
+        // 20 + 25 > 40: refused once its size is known, and its bytes are deleted.
+        var over = await Upload(25);
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        Assert.Contains("quota", await over.Content.ReadAsStringAsync());
+        Assert.Single(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        Assert.Equal((20L, 40L, 1), (await Usage()) is var u ? (u.UsedBytes, u.QuotaBytes!.Value, u.FileCount) : default);
+
+        // A direct upload's declared size counts from the moment it starts.
+        var directUrl = $"/api/v1/files/direct-uploads?tenantId={_tenantId}";
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 25 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 15 })).StatusCode);
+        Assert.Equal(35, (await Usage()).UsedBytes);
+
+        // A deleted file still takes space until retention purges it.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{firstId}")).StatusCode);
+        Assert.Equal(35, (await Usage()).UsedBytes);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(10)).StatusCode);
+    }
+
+    [Fact]
     public async Task Large_uploads_are_streamed_into_storage_intact()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
@@ -786,6 +826,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             Microsoft.Extensions.Logging.Abstractions.NullLogger<IntegrityCheckJob>.Instance);
         await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
     }
+
+    private sealed record UsageResponse(string TenantId, long UsedBytes, long? QuotaBytes, int FileCount);
 
     private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
 
