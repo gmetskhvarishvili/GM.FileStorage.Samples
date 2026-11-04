@@ -1,9 +1,12 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
+using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,13 +29,19 @@ public class RestoreFileCommandValidator : AbstractValidator<RestoreFileCommand>
     }
 }
 
-public class RestoreFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage)
+public class RestoreFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage, ICurrentActor actor)
     : IRequestHandler<RestoreFileCommand>
 {
     public async Task Handle(RestoreFileCommand request, CancellationToken cancellationToken)
     {
+        var tenantId = actor.TenantOrShared();
         var entity = await unitOfWork.StoredFileRepository
-            .FirstOrDefaultAsync(x => x.Id == request.Id && x.IsDeleted, true, null, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.Id
+                                      && x.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId)
+                                      && x.IsDeleted,
+                true,
+                null,
+                cancellationToken);
 
         // Restoring only makes sense when the bytes are still there (they could have been removed out of band).
         if (entity == null || !await storage.ExistsAsync(entity.StorageKey, cancellationToken))

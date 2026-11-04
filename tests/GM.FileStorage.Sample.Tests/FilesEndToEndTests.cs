@@ -36,7 +36,9 @@ namespace GM.FileStorage.Sample.Tests;
 public sealed class FilesEndToEndTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "gm-fs-sample-tests", Guid.NewGuid().ToString("N"));
-    private readonly string _tenantId = $"t-{Guid.NewGuid():N}";
+    // This test's tenant and user, sent on every request as GM's actor headers (X-Tenant-Id, X-User-Id).
+    private readonly string _tenantId = Guid.NewGuid().ToString();
+    private readonly string _userId = Guid.NewGuid().ToString();
     private readonly GmWebApplicationFactory<Program> _factory;
     private bool _infraReady;
 
@@ -46,9 +48,18 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             // The production layout, under a per-test folder: {tenant}/{category}/{shard}/{id}{ext}.
             .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}");
 
-    // This test's files: the ones tagged with its unique tenant id.
+    // A client acting for this test's tenant and user, as the gateway would forward them.
+    private HttpClient Client(GmWebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", _tenantId);
+        client.DefaultRequestHeaders.Add("X-User-Id", _userId);
+        return client;
+    }
+
+    // This test's files: stored under its own key prefix, whichever tenant they were uploaded for.
     private IQueryable<StoredFile> OurFiles(ApplicationDbContext context) =>
-        context.Set<StoredFile>().Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == _tenantId));
+        context.Set<StoredFile>().Where(f => f.StorageKey.StartsWith(_tenantId));
 
     public async Task InitializeAsync()
     {
@@ -90,35 +101,32 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
+        using var client = Client(_factory);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: the file is a GUID; where its bytes went is visible — folders from the key template.
-        var uploaded = await UploadAsync(client, original, "passport.pdf", "userId=u1");
+        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit under {category}/{shard}/
+        // folders from the key template, named after that id (the shard is its first two characters).
+        var uploaded = await UploadAsync(client, original, "passport.pdf");
         Assert.NotEqual(Guid.Empty, uploaded.Id);
-        // Callers see just the stored name; inside, it sits in {category}/{shard}/ folders (the shard is the name's
-        // first two characters), which the catalog keeps.
-        Assert.Matches(@"^[0-9a-f]{32}\.pdf$", uploaded.StorageKey);
+        var hex = uploaded.Id.ToString("N");
         var path = await StoragePathAsync(uploaded.Id);
-        Assert.Equal($"{_tenantId}/documents/{uploaded.StorageKey[..2]}/{uploaded.StorageKey}", path);
+        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", path);
         Assert.True(File.Exists(Path.Combine(_root, path)));
         Assert.Equal(original.Length, uploaded.Size);
 
-        // List by tenant: exactly this file, with its storage location and metadata.
-        var listed = Assert.Single(await ListAsync(client, $"tenantId={_tenantId}"));
-        Assert.Equal((uploaded.Id, uploaded.StorageKey), (listed.Id, listed.StorageKey));
+        // List by tenant: exactly this file, with its metadata and nothing of where it's stored.
+        var listed = Assert.Single(await ListAsync(client, ""));
+        Assert.Equal(uploaded.Id, listed.Id);
+        Assert.DoesNotContain("storageKey", await client.GetStringAsync("/api/v1/files"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(_tenantId, listed.Metadata!["tenantId"]);
-        Assert.Equal("u1", listed.Metadata!["userId"]);
-        Assert.Single(await ListAsync(client, $"tenantId={_tenantId}&userId=u1"));
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}&userId=someone-else"));
-        // Storage folders double as a filter.
-        Assert.Single(await ListAsync(client, $"folder={Uri.EscapeDataString($"{_tenantId}/documents/")}"));
-        Assert.Empty(await ListAsync(client, $"folder={Uri.EscapeDataString($"{_tenantId}/images/")}"));
+        Assert.Equal(_userId, listed.Metadata!["userId"]);
+        Assert.Single(await ListAsync(client, $"userId={_userId}"));
+        Assert.Empty(await ListAsync(client, $"userId={Guid.NewGuid()}"));
 
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");
         Assert.NotNull(details);
-        Assert.Equal(("passport.pdf", "application/pdf", uploaded.StorageKey), (details.FileName, details.ContentType, details.StorageKey));
+        Assert.Equal(("passport.pdf", "application/pdf"), (details.FileName, details.ContentType));
         Assert.False(details.IsDeleted);
 
         // Download: byte-for-byte; presign: a link.
@@ -130,7 +138,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/content")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(await ListAsync(client, ""));
         var deleted = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}?visibility=All");
         Assert.True(deleted!.IsDeleted);
         Assert.Empty(await CleanupEntriesAsync());
@@ -156,9 +164,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        using var client = _factory.CreateClient();
+        using var client = Client(_factory);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 original");
-        var uploaded = await UploadAsync(client, original, "a.pdf", "userId=u1");
+        var uploaded = await UploadAsync(client, original, "a.pdf");
 
         // There is no replace endpoint: PUT on the content is refused and nothing is stored.
         var put = await SendFileAsync(client, HttpMethod.Put, $"/api/v1/files/{uploaded.Id}/content",
@@ -175,8 +183,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        using var client = _factory.CreateClient();
-        var live = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 live"), "live.pdf", "userId=u1");
+        using var client = Client(_factory);
+        var live = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 live"), "live.pdf");
 
         // An upload that died after storing its bytes but before recording them: bytes plus a pending entry.
         var abandonedKey = $"{_tenantId}/documents/ab/abandoned.pdf";
@@ -208,7 +216,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        using var client = _factory.CreateClient();
+        using var client = Client(_factory);
         var id = Guid.NewGuid();
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{id}")).StatusCode);
@@ -219,13 +227,61 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Files_belong_to_the_callers_tenant()
+    {
+        if (!_infraReady) return;
+
+        using var client = Client(_factory);
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 ours");
+        var ours = await UploadAsync(client, bytes, "ours.pdf");
+        var direct = await StartDirectUploadAsync(client, "direct.pdf", "application/pdf", bytes.Length);
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, direct, bytes)).StatusCode);
+
+        // Another tenant sees nothing of ours: not in its list or usage, and every id is a 404, as if unknown.
+        using var other = _factory.CreateClient();
+        other.DefaultRequestHeaders.Add("X-Tenant-Id", Guid.NewGuid().ToString());
+        Assert.Empty(await ListAsync(other, ""));
+        Assert.Equal(0, (await other.GetFromJsonAsync<UsageResponse>("/api/v1/files/usage"))!.FileCount);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}?visibility=All")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/content")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/presign")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.DeleteAsync($"/api/v1/files/{ours.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/api/v1/files/direct-uploads/{direct.UploadId}/complete", null)).StatusCode);
+
+        // Nor can it restore what we deleted.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{ours.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/api/v1/files/{ours.Id}/restore", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{ours.Id}/restore", null)).StatusCode);
+
+        // Without X-Tenant-Id the caller works in the shared "public" space: no tenant sees its files, nor it theirs.
+        // (The shared space may hold other files on this database, so it's checked by id.)
+        using var nobody = _factory.CreateClient();
+        var shared = await UploadAsync(nobody, bytes, "shared.pdf");
+        Assert.Equal(("public", "anon"), (await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}")) is { } s
+            ? (s.Metadata!["tenantId"], s.Metadata!["userId"]) : default);
+        Assert.Single(await ListAsync(nobody, $"id={shared.Id}"));
+        Assert.Equal(HttpStatusCode.OK,
+            (await SendFilesAsync(nobody, "/api/v1/files/batch", ("a.pdf", "application/pdf", bytes))).StatusCode);
+        Assert.Empty(await ListAsync(client, $"id={shared.Id}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{shared.Id}/content")).StatusCode);
+        Assert.Empty(await ListAsync(nobody, $"id={ours.Id}"));
+        Assert.Equal(HttpStatusCode.NotFound, (await nobody.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
+
+        // Ours is untouched, and the direct upload still completes for us.
+        Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{ours.Id}/content"));
+        await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{direct.UploadId}/complete", null));
+        Assert.Equal(2, (await ListAsync(client, "")).Count);
+    }
+
+    [Fact]
     public async Task Download_honours_range_requests()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
+        using var client = Client(_factory);
         var bytes = Encoding.ASCII.GetBytes("%PDF-1.7 0123456789"); // 19 bytes
-        var uploaded = await UploadAsync(client, bytes, "video-ish.pdf", "userId=u1");
+        var uploaded = await UploadAsync(client, bytes, "video-ish.pdf");
         var url = $"/api/v1/files/{uploaded.Id}/content";
 
         async Task<HttpResponseMessage> GetRange(string range)
@@ -261,8 +317,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
-        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}&userId=u1",
+        using var client = Client(_factory);
+        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files",
             bytes, fileName, contentType);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -273,17 +329,356 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Presigned_links_serve_the_file_until_altered_or_deleted()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = Client(_factory);
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 shared by link");
+        var uploaded = await UploadAsync(client, bytes, "shared.pdf");
+
+        var presigned = await client.GetFromJsonAsync<PresignedResponse>($"/api/v1/files/{uploaded.Id}/presign");
+        Assert.NotNull(presigned);
+        // The link points at the gateway (PublicBaseUrl); its path and query are what reach this API.
+        var link = presigned.Url.PathAndQuery;
+        Assert.StartsWith($"/files/{_tenantId}/documents/", link);
+        Assert.Contains("&sig=", link);
+
+        // Anyone holding the link gets the file, no other credentials needed.
+        var served = await client.GetAsync(link);
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal(bytes, await served.Content.ReadAsByteArrayAsync());
+        Assert.Equal("shared.pdf", served.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+
+        // An altered link is refused: another signature, a later expiry, no signature, another operation.
+        var sig = link[(link.IndexOf("&sig=", StringComparison.Ordinal) + 5)..];
+        var forged = link.Replace(sig, new string('0', sig.Length), StringComparison.Ordinal);
+        var expires = link.Split('?')[1].Split('&').Single(p => p.StartsWith("expires=", StringComparison.Ordinal));
+        var extended = link.Replace(expires, $"expires={long.Parse(expires[8..], System.Globalization.CultureInfo.InvariantCulture) + 3600}", StringComparison.Ordinal);
+        var unsigned = link[..link.IndexOf("&sig=", StringComparison.Ordinal)];
+        var write = link.Replace("op=read", "op=write", StringComparison.Ordinal);
+        foreach (var altered in new[] { forged, extended, unsigned, write })
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(altered)).StatusCode);
+
+        // Deleting the file stops the link, though the bytes are kept; restoring brings it back.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(link)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(link)).StatusCode);
+    }
+
+    // Starts a direct upload; returns the response, or throws if it wasn't 200.
+    private static async Task<DirectUploadResponse> StartDirectUploadAsync(HttpClient client, string fileName, string contentType, long size)
+    {
+        var response = await client.PostAsJsonAsync($"/api/v1/files/direct-uploads",
+            new { fileName, contentType, size });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var started = await response.Content.ReadFromJsonAsync<DirectUploadResponse>();
+        Assert.NotNull(started);
+        return started;
+    }
+
+    // Sends the bytes to the link as told (on local disk the link is this API's /files, so the test client can).
+    private static async Task<HttpResponseMessage> PutToLinkAsync(HttpClient client, DirectUploadResponse started, byte[] bytes, string? pathAndQuery = null)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(started.Method), pathAndQuery ?? started.Url.PathAndQuery)
+        {
+            Content = new ByteArrayContent(bytes),
+        };
+        foreach (var (name, value) in started.Headers)
+        {
+            if (!request.Headers.TryAddWithoutValidation(name, value))
+                request.Content.Headers.TryAddWithoutValidation(name, value);
+        }
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task Direct_uploads_go_straight_to_storage_and_are_recorded_on_completion()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = Client(_factory);
+        var bytes = new byte[200_000];
+        new Random(7).NextBytes(bytes);
+        "%PDF-1.7 "u8.CopyTo(bytes);
+
+        var started = await StartDirectUploadAsync(client, "big.pdf", "application/pdf", bytes.Length);
+        Assert.Equal("PUT", started.Method);
+        Assert.Contains("op=write", started.Url.Query);
+        Assert.True(started.ExpiresAtUtc > DateTime.UtcNow);
+
+        // Nothing is recorded until the upload is completed.
+        Assert.Empty(await ListAsync(client, ""));
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, bytes)).StatusCode);
+        Assert.Empty(await ListAsync(client, ""));
+
+        var completed = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
+        Assert.Equal((started.UploadId, "big.pdf", (long)bytes.Length), (completed.Id, completed.FileName, completed.Size));
+        var hex = completed.Id.ToString("N");
+        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", await StoragePathAsync(completed.Id));
+        Assert.Null(completed.Checksum); // the API never read the bytes
+        var listed = Assert.Single(await ListAsync(client, $"userId={_userId}"));
+        Assert.Equal(completed.Id, listed.Id);
+        Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{completed.Id}/content"));
+
+        // Done: the upload can't be completed twice, and nothing is left queued for cleanup.
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null)).StatusCode);
+        Assert.Empty(await CleanupEntriesAsync());
+    }
+
+    [Fact]
+    public async Task Direct_uploads_are_checked_before_and_after_the_bytes_move()
+    {
+        if (!_infraReady) return;
+
+        using var client = Client(_factory);
+        var url = $"/api/v1/files/direct-uploads";
+
+        // Refused up front: a type that isn't allowed, a size over the limit (5 GB).
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new { fileName = "a.html", contentType = "text/html", size = 10 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new { fileName = "a.pdf", contentType = "application/pdf", size = 6L * 1024 * 1024 * 1024 })).StatusCode);
+
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 direct");
+        var started = await StartDirectUploadAsync(client, "a.pdf", "application/pdf", bytes.Length);
+        var complete = $"/api/v1/files/direct-uploads/{started.UploadId}/complete";
+
+        // Completing before anything was sent is refused, but the upload stays open.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(complete, null)).StatusCode);
+
+        // An altered link can't be written.
+        var forged = started.Url.PathAndQuery.Replace("op=write", "op=read", StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Forbidden, (await PutToLinkAsync(client, started, bytes, forged)).StatusCode);
+
+        // Bytes that don't match the declared size: refused on completion, and deleted.
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, [.. bytes, .. "extra"u8])).StatusCode);
+        Assert.Single(StoredObjects());
+        var mismatch = await client.PostAsync(complete, null);
+        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+        Assert.Contains("declared", await mismatch.Content.ReadAsStringAsync());
+        Assert.Empty(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(complete, null)).StatusCode);
+        Assert.Empty(await ListAsync(client, ""));
+    }
+
+    [Fact]
+    public async Task Uploaded_files_are_counted_per_client_not_per_request()
+    {
+        if (!_infraReady) return;
+
+        // Same storage root and key template as the other tests, with a limit of 3 files a minute.
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
+        using var client = Client(factory);
+        var batch = $"/api/v1/files/batch";
+        (string, string, byte[]) Pdf(string name) => (name, "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 " + name));
+
+        // Two files: allowed.
+        Assert.Equal(HttpStatusCode.OK, (await SendFilesAsync(client, batch, Pdf("a.pdf"), Pdf("b.pdf"))).StatusCode);
+
+        // Two more would make four: the batch is refused whole, the file it got to store included.
+        var refused = await SendFilesAsync(client, batch, Pdf("c.pdf"), Pdf("d.pdf"));
+        Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+        Assert.True(refused.Headers.Contains("Retry-After"));
+        Assert.Equal(["a.pdf", "b.pdf"], (await ListAsync(client, "")).Select(f => f.FileName).Order());
+        Assert.Equal(2, StoredObjects().Length);
+
+        // The third permit went to c.pdf before d.pdf was refused, so single and direct uploads are out too.
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Encoding.UTF8.GetBytes("%PDF-1.7 e"), "e.pdf", "application/pdf")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await client.PostAsJsonAsync($"/api/v1/files/direct-uploads", new { fileName = "f.pdf", contentType = "application/pdf", size = 10 })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Retried_uploads_with_the_same_idempotency_key_are_stored_once()
+    {
+        if (!_infraReady) return;
+
+        // A limit of 4 files a minute shows that a replayed retry doesn't count as another file.
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "4");
+        using var client = Client(factory);
+        var single = $"/api/v1/files";
+        async Task<HttpResponseMessage> WithKey(string key, Func<HttpClient, Task<HttpResponseMessage>> send)
+        {
+            client.DefaultRequestHeaders.Remove("Idempotency-Key");
+            client.DefaultRequestHeaders.Add("Idempotency-Key", key);
+            try { return await send(client); }
+            finally { client.DefaultRequestHeaders.Remove("Idempotency-Key"); }
+        }
+        Task<HttpResponseMessage> Pdf(HttpClient c, string name) =>
+            SendFileAsync(c, HttpMethod.Post, single, Encoding.UTF8.GetBytes("%PDF-1.7 " + name), name, "application/pdf");
+
+        // The retry gets the first answer back, marked as replayed; one file is stored. The key alone decides, so even
+        // a different file under the same key gets that answer.
+        var key = Guid.NewGuid().ToString();
+        var first = await ExpectOkAsync(WithKey(key, c => Pdf(c, "a.pdf")));
+        var retry = await WithKey(key, c => Pdf(c, "a.pdf"));
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        Assert.Equal("true", Assert.Single(retry.Headers.GetValues("Idempotency-Replayed")));
+        Assert.Equal(first.Id, (await retry.Content.ReadFromJsonAsync<UploadResponse>())!.Id);
+        Assert.Equal(first.Id, (await ExpectOkAsync(WithKey(key, c => Pdf(c, "other.pdf")))).Id);
+        Assert.Single(await ListAsync(client, ""));
+        Assert.Single(StoredObjects());
+
+        // A refusal isn't remembered: the same key with a fixed file is a new upload.
+        var fixedKey = Guid.NewGuid().ToString();
+        Assert.Equal(HttpStatusCode.BadRequest, (await WithKey(fixedKey, c =>
+            SendFileAsync(c, HttpMethod.Post, single, Encoding.UTF8.GetBytes("<html></html>"), "b.html", "text/html"))).StatusCode);
+        var second = await ExpectOkAsync(WithKey(fixedKey, c => Pdf(c, "b.pdf")));
+        Assert.NotEqual(first.Id, second.Id);
+
+        // Completing a direct upload again replays the file instead of 404.
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 direct");
+        var started = await StartDirectUploadAsync(client, "c.pdf", "application/pdf", bytes.Length);
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, bytes)).StatusCode);
+        var completeKey = Guid.NewGuid().ToString();
+        var complete = $"/api/v1/files/direct-uploads/{started.UploadId}/complete";
+        var completed = await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)));
+        Assert.Equal(completed.Id, (await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)))).Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(complete, null)).StatusCode);
+
+        // Three files stored and one refused: four permits used, however many retries.
+        Assert.Equal(3, (await ListAsync(client, "")).Count);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await Pdf(client, "d.pdf")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Integrity_checks_record_missing_checksums_and_flag_damaged_files()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = Client(_factory);
+        byte[] Pdf(string text) => Encoding.UTF8.GetBytes("%PDF-1.7 " + text);
+        var altered = await UploadAsync(client, Pdf("altered"), "altered.pdf");
+        var grown = await UploadAsync(client, Pdf("grown"), "grown.pdf");
+        var lost = await UploadAsync(client, Pdf("lost"), "lost.pdf");
+
+        // A direct upload is recorded without a checksum: the API never read its bytes.
+        var directBytes = Pdf("direct upload");
+        var started = await StartDirectUploadAsync(client, "direct.pdf", "application/pdf", directBytes.Length);
+        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, directBytes)).StatusCode);
+        var direct = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
+        Assert.Null(direct.Checksum);
+
+        // Damage three files on disk: same size but different bytes, extra bytes, gone.
+        var alteredPath = Path.Combine(_root, await StoragePathAsync(altered.Id));
+        await File.WriteAllBytesAsync(alteredPath, Pdf("ALTERED"));
+        await File.AppendAllTextAsync(Path.Combine(_root, await StoragePathAsync(grown.Id)), "more");
+        File.Delete(Path.Combine(_root, await StoragePathAsync(lost.Id)));
+
+        await RunIntegrityJobAsync();
+
+        async Task<DetailsResponse> Details(Guid id) =>
+            (await client.GetFromJsonAsync<DetailsResponse>($"/api/v1/files/{id}"))!;
+        var directDetails = await Details(direct.Id);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(directBytes)), directDetails.Checksum);
+        Assert.Null(directDetails.IntegrityProblem);
+        Assert.NotNull(directDetails.VerifiedAtUtc);
+        Assert.Contains("checksum", (await Details(altered.Id)).IntegrityProblem);
+        Assert.Contains("bytes, not the", (await Details(grown.Id)).IntegrityProblem);
+        Assert.Contains("missing", (await Details(lost.Id)).IntegrityProblem);
+
+        // The list finds them.
+        Assert.Equal(new[] { altered.Id, grown.Id, lost.Id }.Order(),
+            (await ListAsync(client, $"integrityProblem=true")).Select(f => f.Id).Order());
+        Assert.Equal([direct.Id], (await ListAsync(client, $"integrityProblem=false")).Select(f => f.Id));
+    }
+
+    [Fact]
+    public async Task Retention_purges_files_deleted_too_long_ago_and_keeps_the_rest_restorable()
+    {
+        if (!_infraReady) return;
+
+        using var client = Client(_factory);
+        var old = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 old"), "old.pdf");
+        var recent = await UploadAsync(client, Encoding.UTF8.GetBytes("%PDF-1.7 recent"), "recent.pdf");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{old.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{recent.Id}")).StatusCode);
+
+        // One deleted 40 days ago, the other just now; retention keeps deleted files for 30 days.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Assert.NotNull(await context.Set<StoredFile>().Where(x => x.Id == recent.Id).Select(x => x.DeletedAtUtc).SingleAsync());
+            await context.Set<StoredFile>().Where(x => x.Id == old.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.DeletedAtUtc, DateTime.UtcNow.AddDays(-40)));
+        }
+
+        var job = new RetentionJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new RetentionOptions { DeletedFileDays = 30 }));
+        var result = await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
+
+        // The old one is gone for good, bytes included; the recent one can still be restored.
+        Assert.Equal(1, result.ProcessedCount);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/files/{old.Id}?visibility=All")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{old.Id}/restore", null)).StatusCode);
+        Assert.Single(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/v1/files/{recent.Id}/restore", null)).StatusCode);
+        using var after = _factory.Services.CreateScope();
+        Assert.Null(await after.ServiceProvider.GetRequiredService<ApplicationDbContext>()
+            .Set<StoredFile>().Where(x => x.Id == recent.Id).Select(x => x.DeletedAtUtc).SingleAsync());
+    }
+
+    [Fact]
+    public async Task Uploads_stay_within_the_tenants_storage_quota()
+    {
+        if (!_infraReady) return;
+
+        // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
+            .WithConfig("Quotas:BytesPerTenant", "40");
+        using var client = Client(factory);
+        byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
+        async Task<HttpResponseMessage> Upload(int length) =>
+            await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Pdf(length), "f.pdf", "application/pdf");
+        async Task<UsageResponse> Usage() => (await client.GetFromJsonAsync<UsageResponse>($"/api/v1/files/usage"))!;
+
+        var first = await Upload(20);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstId = (await first.Content.ReadFromJsonAsync<UploadResponse>())!.Id;
+
+        // 20 + 25 > 40: refused once its size is known, and its bytes are deleted.
+        var over = await Upload(25);
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        Assert.Contains("quota", await over.Content.ReadAsStringAsync());
+        Assert.Single(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        Assert.Equal((20L, 40L, 1), (await Usage()) is var u ? (u.UsedBytes, u.QuotaBytes!.Value, u.FileCount) : default);
+
+        // A direct upload's declared size counts from the moment it starts.
+        var directUrl = $"/api/v1/files/direct-uploads";
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 25 })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 15 })).StatusCode);
+        Assert.Equal(35, (await Usage()).UsedBytes);
+
+        // A deleted file still takes space until retention purges it.
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{firstId}")).StatusCode);
+        Assert.Equal(35, (await Usage()).UsedBytes);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(10)).StatusCode);
+    }
+
+    [Fact]
     public async Task Large_uploads_are_streamed_into_storage_intact()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
+        using var client = Client(_factory);
         // Well past the 64 KB at which ASP.NET would spill a buffered form to disk.
         var bytes = new byte[3 * 1024 * 1024 + 17];
         new Random(42).NextBytes(bytes);
         "%PDF-1.7 "u8.CopyTo(bytes);
 
-        var uploaded = await UploadAsync(client, bytes, "scan.pdf", "userId=u1");
+        var uploaded = await UploadAsync(client, bytes, "scan.pdf");
 
         Assert.Equal(bytes.Length, uploaded.Size);
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
@@ -304,17 +699,17 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
             .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
             .WithConfig("FileStorage:MaxFileSize", limit.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .WithServices(services => services.AddSingleton<IStartupFilter>(bodyRead));
-        using var client = factory.CreateClient();
+        using var client = Client(factory);
 
         var bytes = new byte[size];
         "%PDF-1.7 "u8.CopyTo(bytes);
-        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}", bytes, "huge.pdf", "application/pdf");
+        var response = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", bytes, "huge.pdf", "application/pdf");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains($"{limit}-byte limit", await response.Content.ReadAsStringAsync());
         // Refused soon after the limit: a server that buffered the form would have read all 8 MB first.
         Assert.InRange(bodyRead.AtResponse, limit, 1024 * 1024);
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(await ListAsync(client, ""));
         Assert.Empty(StoredObjects());
         Assert.Empty(await CleanupEntriesAsync());
     }
@@ -324,8 +719,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
-        var response = await SendFilesAsync(client, $"/api/v1/files/batch?tenantId={_tenantId}&userId=u1",
+        using var client = Client(_factory);
+        var response = await SendFilesAsync(client, $"/api/v1/files/batch",
             ("a.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 a")),
             ("page.html", "text/html", Encoding.UTF8.GetBytes("<html></html>")),
             ("b.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", [(byte)'P', (byte)'K', 3, 4, 20, 0]));
@@ -340,7 +735,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Null(results[1].File);
 
         // Each stored file is a file of its own, under the batch's tenant and user.
-        var listed = await ListAsync(client, $"tenantId={_tenantId}&userId=u1");
+        var listed = await ListAsync(client, $"userId={_userId}");
         Assert.Equal(new[] { results[0].File!.Id, results[2].File!.Id }.Order(), listed.Select(f => f.Id).Order());
         Assert.Equal("%PDF-1.7 a", await client.GetStringAsync($"/api/v1/files/{results[0].File!.Id}/content"));
         Assert.Equal(2, StoredObjects().Length);
@@ -352,14 +747,14 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        using var client = _factory.CreateClient();
-        var response = await SendFilesAsync(client, $"/api/v1/files?tenantId={_tenantId}",
+        using var client = Client(_factory);
+        var response = await SendFilesAsync(client, $"/api/v1/files",
             ("a.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 a")),
             ("b.pdf", "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 b")));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("files/batch", await response.Content.ReadAsStringAsync());
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(await ListAsync(client, ""));
         Assert.Empty(StoredObjects());
     }
 
@@ -368,8 +763,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        using var client = _factory.CreateClient();
-        var url = $"/api/v1/files/batch?tenantId={_tenantId}";
+        using var client = Client(_factory);
+        var url = $"/api/v1/files/batch";
 
         var tooMany = Enumerable.Range(0, 21)
             .Select(i => ($"f{i}.pdf", "application/pdf", Encoding.UTF8.GetBytes($"%PDF-1.7 {i}")))
@@ -379,7 +774,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var empty = new MultipartFormDataContent { { new StringContent("x"), "note" } };
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(url, empty)).StatusCode);
 
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(await ListAsync(client, ""));
         Assert.Empty(StoredObjects());
     }
 
@@ -388,8 +783,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
-        using var client = _factory.CreateClient();
-        var url = $"/api/v1/files?tenantId={_tenantId}&userId=u1";
+        using var client = Client(_factory);
+        var url = $"/api/v1/files";
 
         // An executable dressed up as a PDF: the bytes give it away (FileStorage:VerifyContentType).
         var disguised = await SendFileAsync(client, HttpMethod.Post, url, [(byte)'M', (byte)'Z', 0x90, 0, 3, 0, 0, 0], "invoice.pdf", "application/pdf");
@@ -400,7 +795,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var html = await SendFileAsync(client, HttpMethod.Post, url, Encoding.UTF8.GetBytes("<html></html>"), "page.html", "text/html");
         Assert.Equal(HttpStatusCode.BadRequest, html.StatusCode);
 
-        Assert.Empty(await ListAsync(client, $"tenantId={_tenantId}"));
+        Assert.Empty(await ListAsync(client, ""));
         Assert.Empty(StoredObjects());
     }
 
@@ -440,8 +835,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         await job.ExecuteAsync(new JobExecutionContext { JobName = StorageCleanupJob.JobName, FireTimeUtc = DateTimeOffset.UtcNow }, default);
     }
 
-    private Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName, string query) =>
-        ExpectOkAsync(SendFileAsync(client, HttpMethod.Post, $"/api/v1/files?tenantId={_tenantId}&{query}", bytes, fileName, "application/pdf"));
+    private static Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName) =>
+        ExpectOkAsync(SendFileAsync(client, HttpMethod.Post, "/api/v1/files", bytes, fileName, "application/pdf"));
 
     private static async Task<UploadResponse> ExpectOkAsync(Task<HttpResponseMessage> send)
     {
@@ -484,7 +879,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         return result;
     }
 
-    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
 
     // Counts the request bytes the app reads, and notes how many it had read when the response started.
     private sealed class BodyReadCounter : IStartupFilter
@@ -537,11 +932,27 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         }
     }
 
+    // Checks this test's files only: the database is shared with whatever else is in it.
+    private async Task RunIntegrityJobAsync()
+    {
+        var job = new IntegrityCheckJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            Microsoft.Extensions.Options.Options.Create(new IntegrityOptions { BatchSize = 100 }),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<IntegrityCheckJob>.Instance);
+        await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
+    }
+
+    private sealed record UsageResponse(string TenantId, long UsedBytes, long? QuotaBytes, int FileCount);
+
+    private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
+
+    private sealed record PresignedResponse(Uri Url, DateTime ExpiresAtUtc);
+
+    private sealed record DirectUploadResponse(Guid UploadId, Uri Url, string Method, Dictionary<string, string> Headers, DateTime ExpiresAtUtc);
+
     private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);
 
     private sealed record StoredFileResponse(
         Guid Id,
-        string StorageKey,
         string FileName,
         string ContentType,
         long Size,

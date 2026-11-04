@@ -11,13 +11,13 @@ Participants used throughout:
 | **API** | `Files API`: `FilesController` → GM.Mediator → the command or query handler |
 | **DB** | PostgreSQL, through the unit of work |
 | **Storage** | `IFileStorageService`: Local, S3 or Azure Blob, wrapped by encryption when it's on |
-| **Worker** | `StorageCleanupJob` on GM.Scheduling |
+| **Worker** | `StorageCleanupJob`, `IntegrityCheckJob` and `RetentionJob` on GM.Scheduling |
 
 The bytes (in storage) and the rows (in Postgres) can't share a transaction. Every write is ordered so that any
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [Direct upload](#direct-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -44,7 +44,7 @@ sequenceDiagram
 
     W->>Sec: appsettings.json + appsecrets.json + env
     W->>W: register persistence, file storage, lock, scheduling
-    W->>W: schedule "storage-cleanup" (cron, every minute)
+    W->>W: schedule storage-cleanup (every minute), integrity-check (every 5 minutes), retention (hourly)
 
     G->>G: load routes, cluster and rate-limit policies
     G->>G: listen on :7141
@@ -103,8 +103,8 @@ sequenceDiagram
 
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
-    API->>API: validate (file name, content type, ids)
-    API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
+    API->>API: validate (file name, content type), tenant from X-Tenant-Id or public
+    API->>API: new file id, storage key from KeyTemplate on it<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
     S->>S: check allowed type and bytes from the first bytes,<br/>count size as it streams
@@ -117,7 +117,7 @@ sequenceDiagram
         S-->>API: size, checksum, content type
         API->>DB: BEGIN
         API->>DB: insert stored_files (id, storage key, …)
-        API->>DB: insert stored_file_metadata (tenantId, userId)
+        API->>DB: insert stored_file_metadata (the caller's tenantId, userId)
         API->>DB: delete the queued entry
         API->>DB: insert domain event (uploaded)
         API->>DB: COMMIT
@@ -131,7 +131,7 @@ sequenceDiagram
                 API->>S: delete the bytes (left queued if this fails)
                 API-->>C: 400 use /files/batch, nothing kept
             else
-                API-->>C: 200 { id, storageKey: "9f1c….pdf", … }
+                API-->>C: 200 { id: "9f1c…", fileName, … }
             end
         end
     end
@@ -159,19 +159,18 @@ sequenceDiagram
     participant DB
     participant S as Storage
 
-    C->>B: UploadFilesCommand (file parts as they arrive, tenantId, userId)
-    B->>B: validate: tenantId, userId
+    C->>B: UploadFilesCommand (file parts as they arrive)
     loop each file part, as it arrives off the request
         alt already 20 files
             B->>DB: discard the stored files (rows removed, bytes queued and deleted)
             B-->>C: BadRequestException → 400, nothing kept
         end
-        B->>U: UploadFileCommand (same tenant and user)
+        B->>U: UploadFileCommand (the caller's tenant and user)
         U->>DB: queue the storage key
         U->>S: upload (rules checked)
         U->>DB: one transaction: file row, metadata, drop the queued entry
         alt stored
-            U-->>B: id, storageKey, …
+            U-->>B: id, fileName, …
             B->>B: result: succeeded
         else validation or upload rule failed
             U-->>B: ValidationException / BadRequestException
@@ -192,9 +191,49 @@ Every file goes through the full single-file sequence above, in its own transact
 before and after it untouched. A cancelled request (the client disconnects) stops the batch; the files already
 stored stay.
 
+## Direct upload — sequence
+
+`POST /api/v1/files/direct-uploads`, the client's PUT, then `POST …/direct-uploads/{uploadId}/complete`
+
+```mermaid
+---
+title: Direct upload — sequence
+---
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant API
+    participant DB
+    participant S as Storage
+
+    C->>API: start (fileName, contentType, size)
+    API->>API: upload permit, type allowed, size ≤ 5 GB
+    API->>API: new upload id, storage key from KeyTemplate on it
+    API->>S: GetPresignedUrlAsync(key, Write, 1 hour)
+    API->>DB: one transaction: direct_uploads row,<br/>storage_cleanups (key, due when the link expires + 15 min)
+    API-->>C: uploadId, url, PUT, headers, expiresAtUtc
+
+    C->>S: PUT url with the bytes (on local disk, the API's /files takes it)
+
+    C->>API: complete (uploadId)
+    API->>DB: the pending upload
+    API->>S: exists? then the first bytes and real size (a ranged read)
+    alt wrong size or type
+        API->>DB: forget the upload
+        API->>S: delete the bytes (left queued if this fails)
+        API-->>C: 400
+    else matches
+        API->>DB: one transaction: stored_files + metadata,<br/>remove the upload and its cleanup entry
+        API-->>C: 200 { id (the upload's), size }
+    end
+```
+
+An upload that's never completed is forgotten by the worker once its link expires, and its bytes deleted with the
+cleanup entry queued at the start.
+
 ## List — sequence
 
-`GET /api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=`
+`GET /api/v1/files?userId=&contentType=&currentPage=&pageSize=` with an optional `X-Tenant-Id`
 
 ```mermaid
 ---
@@ -205,18 +244,17 @@ sequenceDiagram
     participant API
     participant DB
 
-    API->>API: build StoredFileSpecification<br/>(tenant, user, folder, content type, dates, visibility)
+    API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, content type, dates, visibility)
     opt total count requested
         API->>DB: SELECT count(*) … WHERE metadata EXISTS (name, value) …
     end
     API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET (with metadata)
     DB-->>API: rows
-    API->>API: map: storage key → name only, metadata → map
+    API->>API: map: metadata → map (the storage key stays inside)
     API-->>API: 200 [files] + X-Pagination
 ```
 
-Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
-The folder filter is a prefix match on the storage key.
+The tenant is always the caller's. Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
 
 ## Details — sequence
 
@@ -235,7 +273,7 @@ sequenceDiagram
     alt no row
         API-->>API: 404
     else
-        API-->>API: 200 details (storage key as name only)
+        API-->>API: 200 details
     end
 ```
 
@@ -356,8 +394,23 @@ sequenceDiagram
     else
         S-->>API: signed URL
         API-->>C: 200 { url, expiresAtUtc }
-        C->>S: GET url (straight to storage, no API)
     end
+
+    Note over C,S: S3 / Azure: the link goes straight to storage
+    C->>S: GET url
+
+    Note over C,S: Local disk: the link is {PublicBaseUrl}/{storage key}?expires&op&sig, served by the API
+    C->>API: GET /files/{storage key}?… (through the gateway)
+    API->>API: LocalPresignedUrlValidator: HMAC signature, expiry, op=read
+    alt invalid or expired
+        API-->>C: 403
+    end
+    API->>DB: live file by storage key
+    alt deleted since the link was made
+        API-->>C: 404
+    end
+    API->>S: DownloadAsync(storage key)
+    API-->>C: 200 the file (streamed)
 ```
 
 ## Encryption at rest — sequence
@@ -445,6 +498,70 @@ sequenceDiagram
 
 Claiming by the `due_at_utc` concurrency token means the job and an upload slower than its 15-minute grace
 period can't both act on one entry: whichever saves second fails and leaves it alone.
+
+## Integrity check — sequence
+
+The worker, every 5 minutes.
+
+```mermaid
+---
+title: Integrity check — sequence
+---
+sequenceDiagram
+    autonumber
+    participant W as IntegrityCheckJob
+    participant DB
+    participant S as Storage
+
+    W->>DB: the files checked least recently (never-checked first), 20 per run
+    loop each file, in its own scope
+        W->>S: DownloadAsync (decrypted when encryption is on)
+        alt object missing
+            W->>DB: problem = bytes missing
+        else read
+            W->>W: hash and count the bytes as they stream
+            alt fails decryption
+                W->>DB: problem = altered or truncated
+            else wrong size
+                W->>DB: problem = size differs from the record
+            else no checksum recorded yet (a direct upload)
+                W->>DB: record the checksum, no problem
+            else checksum differs
+                W->>DB: problem = checksum mismatch
+            else matches
+                W->>DB: no problem
+            end
+        end
+        W->>DB: verified_at_utc = now
+    end
+```
+
+A storage error that isn't a verdict on the bytes (the service didn't answer) records nothing, and the file is
+tried again next run. Problems show as `integrityProblem` in details and the list, and the list filters on them.
+
+## Retention — sequence
+
+The worker, hourly.
+
+```mermaid
+---
+title: Retention — sequence
+---
+sequenceDiagram
+    autonumber
+    participant W as RetentionJob
+    participant DB
+    participant S as Storage
+
+    W->>DB: deleted files with deleted_at_utc older than 30 days, 100 per run
+    W->>DB: one transaction: remove their rows and metadata,<br/>queue each storage key for cleanup (due now)
+    W->>S: delete the bytes
+    alt a delete failed
+        Note over W,DB: left queued for the storage-cleanup job
+    end
+```
+
+`Retention:DeletedFileDays` set to 0 keeps deleted files forever.
 
 ## Health checks — sequence
 

@@ -1,4 +1,5 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
@@ -6,6 +7,7 @@ using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.Stor
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -25,12 +27,6 @@ public class UploadFileCommand : IRequest<UploadedFileDto>
     public Stream? Content { get; set; }
     public string? FileName { get; set; }
     public string? ContentType { get; set; }
-
-    /// <summary>Tenant the file belongs to; defaults to <c>public</c>.</summary>
-    public string? TenantId { get; set; }
-
-    /// <summary>User the file belongs to; defaults to <c>anon</c>.</summary>
-    public string? UserId { get; set; }
 }
 
 public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
@@ -40,8 +36,6 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
         RuleFor(x => x.Content).NotNull();
         RuleFor(x => x.FileName).NotNull().NotEmpty().MaximumLength(StoredFile.FileNameMaxLength);
         RuleFor(x => x.ContentType).NotNull().NotEmpty().MaximumLength(StoredFile.ContentTypeMaxLength);
-        RuleFor(x => x.TenantId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-        RuleFor(x => x.UserId).MaximumLength(StoredFileMetadata.ValueMaxLength);
     }
 }
 
@@ -59,22 +53,31 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// the new bytes are deleted (or left to the job).</item>
 /// </list>
 /// </remarks>
-public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy)
+public class UploadFileCommandHandler(
+    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota,
+    ICurrentActor actor)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows.
+        // The caller's tenant and user travel as upload metadata, kept by the catalog as searchable rows.
         var metadata = new Dictionary<string, string>
         {
-            [StoredFileMetadataNames.TenantId] = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId,
-            [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
+            [StoredFileMetadataNames.TenantId] = actor.TenantOrShared(),
+            [StoredFileMetadataNames.UserId] = actor.UserOrAnonymous(),
         };
 
-        // Where these bytes go: a path from FileStorage:KeyTemplate. It's needed before the upload (it's queued
-        // first), so it's built from the declared content type; with FileStorage:VerifyContentType on, a declaration
-        // the bytes don't match is rejected by the upload, so the {category} folder can't lie.
-        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType });
+        // The file's id, and where its bytes go: a path from FileStorage:KeyTemplate built on that id, so the stored
+        // object is named after the file. It's needed before the upload (it's queued first), so it's built from the
+        // declared content type; with FileStorage:VerifyContentType on, a declaration the bytes don't match is
+        // rejected by the upload, so the {category} folder can't lie.
+        var id = Guid.NewGuid();
+        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType, Id = id });
+
+        // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
+        // upload has streamed, so it's checked again then).
+        var tenantId = metadata[StoredFileMetadataNames.TenantId];
+        await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, 0, cancellationToken);
 
         // 1. Queue the new storage key before any bytes exist, so a crash after the upload can't strand them.
         var pending = StorageCleanup.Create(storageKey, DateTime.UtcNow.Add(StorageCleanup.PendingUploadGracePeriod));
@@ -108,11 +111,22 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
             throw;
         }
 
+        // Now the size is known: over the quota, the bytes go.
+        try
+        {
+            await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, stored.Size, cancellationToken);
+        }
+        catch (BadRequestException)
+        {
+            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            throw;
+        }
+
         // 3. Record it, in one transaction.
         StoredFile entity;
         try
         {
-            entity = StoredFile.Create(Guid.NewGuid(), storageKey, stored.FileName, stored.ContentType, stored.Size,
+            entity = StoredFile.Create(id, storageKey, stored.FileName, stored.ContentType, stored.Size,
                 stored.Checksum, stored.Visibility == FileVisibility.Public,
                 stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow);
             await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
@@ -144,7 +158,6 @@ public class UploadFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServic
         return new UploadedFileDto
         {
             Id = entity.Id,
-            StorageKey = StorageKeys.Name(entity.StorageKey),
             FileName = entity.FileName,
             ContentType = entity.ContentType,
             Size = entity.Size,
@@ -158,9 +171,6 @@ public class UploadedFileDto
 {
     /// <summary>The file's identifier (a GUID): use it for every other call.</summary>
     public Guid Id { get; set; }
-
-    /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
-    public string? StorageKey { get; set; }
 
     public string? FileName { get; set; }
     public string? ContentType { get; set; }

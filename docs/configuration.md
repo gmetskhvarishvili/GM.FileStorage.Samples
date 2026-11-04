@@ -35,13 +35,21 @@ flowchart LR
 | Setting | Gateway | API | Worker | Where |
 | --- | :-: | :-: | :-: | --- |
 | `ReverseProxy:*` (routes, cluster address) | ✓ | | | appsettings.json |
-| `RateLimiting:Policies:*` | ✓ | | | appsettings.json |
+| `RateLimiting:Policies:*`: the gateway's per-request limits, the API's `uploaded-files` (30 files a minute per client) | ✓ | ✓ | | appsettings.json |
+| `Redis:ConnectionString` (share limits, counts, idempotency keys and the job lock across instances; unset: in memory) | ✓ | ✓ | ✓ | environment / appsecrets.json |
+| `Idempotency:LockExpiry` (10 minutes: how long a request holds its `Idempotency-Key`, longer than an upload takes) | | ✓ | | appsettings.json |
+| `DirectUploads:MaxFileSize` (5 GB), `DirectUploads:LinkExpiry` (1 hour) | | ✓ | | appsettings.json |
 | `Kestrel:Limits:MaxRequestBodySize` (60 MB) | ✓ | ✓ | | appsettings.json |
 | `ConnectionStrings:ApplicationDatabase` | | ✓ | ✓ | appsecrets.json |
 | `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json |
 | `FileStorage:Local:RootPath` | | ✓ | ✓ | appsettings.json — must be the same folder |
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
-| `FileStorage:Encryption:*` (master keys) | | ✓ | | appsecrets.json |
+| `FileStorage:Encryption:*` (master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsecrets.json |
+| `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
+| `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
+| `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
+| `FileStorage:Local:SigningKey` (signs local-disk presigned links) | | ✓ | | appsecrets.json |
+| `FileStorage:Local:PublicBaseUrl` (where those links point: the gateway's `/files`) | | ✓ | | appsettings.json |
 
 ¹ The worker only deletes objects, so of these it needs only `Provider` and the provider's own settings.
 
@@ -64,6 +72,9 @@ Routes are matched in order of specificity; each names a rate-limit policy and t
 | `files-upload` | `POST /api/{version}/files` | `uploads` |
 | `files-batch-upload` | `POST /api/{version}/files/batch` | `uploads` |
 | `files` | `/api/{version}/files/{**catch-all}` | `api` |
+| `files-direct-upload-start` | `POST /api/{version}/files/direct-uploads` | `uploads` |
+| `files-presigned-write` | `PUT /files/{**catch-all}` (local-disk direct uploads) | `uploads` |
+| `files-presigned` | `GET /files/{**catch-all}` (local-disk presigned links) | `api` |
 | `files-api-docs` | `GET /swagger/{**catch-all}` | none |
 
 | Policy | Algorithm | Limit |
@@ -89,7 +100,7 @@ its deletes would miss the API's files and the queue would back off forever.
 
 ```jsonc
 "FileStorage": {
-  "KeyTemplate": "{category}/{shard}/{id}{ext}"   // documents/9f/9f1c….pdf
+  "KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1c… → documents/9f/9f1c….pdf
 }
 ```
 

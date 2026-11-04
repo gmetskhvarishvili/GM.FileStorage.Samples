@@ -10,7 +10,7 @@
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
 keys organised by file type, delete and presigned links through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
-metadata, so files can be listed by tenant or user, inspected by id, soft-deleted and restored. Targets
+metadata, so each tenant's files can be listed, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
 
 It assembles **[GM.FileStorage](https://www.nuget.org/packages/GM.FileStorage)** with its
@@ -50,16 +50,16 @@ flowchart LR
 | [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
 | [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
-> Every `GM.FileStorage*` reference here is pinned to **2.0.2** (the packages release in lockstep). 2.0.0 added
+> Every `GM.FileStorage*` reference here is pinned to **3.0.0** (the packages release in lockstep). 2.0.0 added
 > encryption at rest, key templates and upload rules, and removed `GMStoredFile.Replace`: a file's content
-> never changes after upload. 2.0.1 measures an upload's size instead of trusting the stream; 2.0.2 fixes S3
-> presigned links on plain-HTTP endpoints and checksum checks on ranged S3 downloads.
+> never changes after upload. 2.1.0 signs local-disk presigned links, 2.2.0 records checksums measured after
+> upload, and 3.0.0 removes `GMStoredFile.Key`: a file is its id, and key templates can build on it.
 
 ## Layers
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, storage folder, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, content type, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
@@ -71,9 +71,9 @@ flowchart LR
 
 ## What it demonstrates
 
-- **One GUID per file; its storage location shown.** A file is identified by a GUID, its id, which is also
-  its key; every route uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate` (see
-  below). Responses show only the stored object's name, as `storageKey`; the folders stay internal.
+- **One GUID per file.** A file is identified by a GUID, its id, and that's all a caller sees; every route
+  uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate`, in an object named after the id
+  (see below), which stays internal.
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
@@ -89,13 +89,48 @@ flowchart LR
 - **Refusing a request after storing part of it.** Streaming means a second file (on the single endpoint) or a 21st
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
+- **Files counted per client, not requests.** Every uploaded file takes a permit from
+  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single, batch and direct uploads alike: a batch of
+  20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
+  limits requests on top.
+- **Direct uploads for large files.** `POST /files/direct-uploads` returns a presigned write link (up to 5 GB, an hour
+  to use it); the client sends the bytes straight to S3 or Azure, then completes the upload. The API checks the stored
+  object (size, and its first bytes against the declared type) before recording it, and deletes what doesn't match.
+  On local disk the link is signed and the API's `/files` takes the PUT. Not available with encryption at rest.
+- **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
+  runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
+  nothing and counts no file. That covers a single upload, a batch, starting a direct upload and completing one. Only
+  successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
+  while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
+  the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the
+  sample only lengthens `Idempotency:LockExpiry` to 10 minutes so a slow upload keeps its key locked.
+- **Ready to scale out.** With `Redis:ConnectionString` set, the gateway's limits, the per-client file count,
+  idempotency keys and the worker's job lock live in Redis, shared by every instance (compose runs Redis and two
+  workers). Without it each service keeps them in memory, which suits one instance.
+- **Integrity checks.** Every 5 minutes the worker reads a batch of stored files back (decrypted when encryption is
+  on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
+  as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
+  `integrityProblem=true`. Direct uploads, recorded without a checksum, get one here.
+- **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
+  `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
+- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged
+  and direct uploads in progress. An upload that would go past it gets a `400`, and its bytes are deleted.
+  `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
   and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
-- **Searchable metadata.** The list filters by tenant/user with `Metadata.Any(...)` sub-queries served by the
-  `(name, value)` index, plus storage folder and content type, with GM.API paging (`X-Pagination` header).
+- **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
+  and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
+  and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
+  didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
+  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the user is `anon`. The gateway passes
+  the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
+  sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
+  sets them from the token.
+- **Searchable metadata.** The list filters by user with `Metadata.Any(...)` sub-queries served by the
+  `(name, value)` index, plus content type and integrity problems, with GM.API paging (`X-Pagination` header).
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -107,15 +142,15 @@ flowchart LR
 
 ## Storage layout
 
-A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is a separate
-**storage key**, made from `FileStorage:KeyTemplate` in appsettings.json, with no code involved:
+A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is its **storage key**,
+made from `FileStorage:KeyTemplate` in appsettings.json and built on that id, with no code involved:
 
 ```jsonc
-"KeyTemplate": "{category}/{shard}/{id}{ext}"   // → documents/9f/9f1cb2…a3.pdf, images/4e/4e07…png
+"KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1cb2d4-… → documents/9f/9f1cb2d4….pdf
 ```
 
-Responses show only the stored object's name as `storageKey` (`9f1cb2…a3.pdf`); the folders are an internal
-layout detail.
+The storage key never leaves the API: callers only ever use the id. Anyone browsing the bucket or the disk can
+still tell which file an object belongs to.
 
 - **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
   from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
@@ -125,8 +160,8 @@ layout detail.
   - When the library generates the key itself, it uses the detected type instead.
 - **`{shard}` spreads files out.** It's the first two characters of `{id}`, so files spread over 256
   folders per category and no folder grows huge.
-- **`{id}{ext}` is a random id plus the file's extension, cleaned up.** `{id}` is required, so
-  storage keys never collide.
+- **`{id}{ext}` is the file's id plus its extension, cleaned up.** The sample picks the id first and hands it
+  to the key strategy (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
 - **Nothing identifying.** Tenant, user and date stay out of the path. They're searchable metadata in
   the catalog, which is how files are found.
 - **Other layouts are a config change.**
@@ -135,7 +170,6 @@ layout detail.
     before use, so they can't add folders or `..`.
   - The template is checked at startup, so a typo fails fast.
 
-The folders also work as a list filter, for example `GET /api/v1/files?folder=images/`.
 
 ## Keeping storage and the database in step
 
@@ -193,18 +227,24 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
-| `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
+| `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
+| `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
+| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, metadata and last integrity check included |
+| `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
-| `GET` | `/api/v1/files/{id}/presign` | A time-limited link (needs `FileStorage:Local:PublicBaseUrl` for the local provider) |
+| `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
+| `POST` | `/api/v1/files/direct-uploads` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
+| `POST` | `/api/v1/files/direct-uploads/{uploadId}/complete` | After sending the bytes: checks the stored object and records the file (`400` and deleted if it doesn't match) |
+| `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
+| `PUT` | `/files/{storageKey}?expires=&op=write&sig=` | Takes a local-disk direct upload's bytes (S3 and Azure take theirs themselves) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
-Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
+`/api/v1` calls may carry `X-Tenant-Id` (a GUID) and `X-User-Id`; without a tenant they work in the shared
+`public` space. The links under `/files` are signed instead. Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
 30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
 
 ## Database setup
@@ -262,19 +302,21 @@ dotnet run --project GM.FileStorage.Sample.Worker       # storage cleanup, every
 dotnet run --project GM.FileStorage.Sample.Gateway.API  # https://localhost:7141, Swagger UI at /
 ```
 
-Then call the gateway:
+Then call the gateway, as a tenant (any GUID; leave `-H "$T"` out to use the shared space):
 
 ```bash
-curl -F "file=@passport.pdf" "https://localhost:7141/api/v1/files?tenantId=acme&userId=u1"
-# { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+T="X-Tenant-Id: 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71"
 
-curl -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch?tenantId=acme&userId=u1"
+curl -H "$T" -F "file=@passport.pdf" "https://localhost:7141/api/v1/files"
+# { "id": "6f1e…-…", "fileName": "passport.pdf", "contentType": "application/pdf", "size": 12345, … }
+
+curl -H "$T" -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch"
 # [ { "fileName": "visa.pdf", "succeeded": true, "file": { "id": "…", … } }, { "fileName": "contract.docx", … } ]
 
-curl "https://localhost:7141/api/v1/files?tenantId=acme"
-curl -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
-curl -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
-curl -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
+curl -H "$T" "https://localhost:7141/api/v1/files"
+curl -H "$T" -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
+curl -H "$T" -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
+curl -H "$T" -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
 ```
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
@@ -291,8 +333,9 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 
 ## Running in Docker
 
-`docker-compose.yml` runs the whole sample: PostgreSQL, the API, the worker and the gateway, built from the one
-`Dockerfile` (its `PROJECT` build argument picks the host).
+`docker-compose.yml` runs the whole sample: PostgreSQL, Redis, the API, two workers and the gateway, built from the
+one `Dockerfile` (its `PROJECT` build argument picks the host). With Redis the rate limits, the per-client file count
+and the job lock are shared, so the two workers never clean at the same time.
 
 ```bash
 docker compose up -d --build
@@ -311,11 +354,15 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
-against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
+against a throwaway storage root and drive it over HTTP: upload (stored under its own id) → list by user → details →
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
-the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They need PostgreSQL and
+the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
+uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
+missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
+per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
+`PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

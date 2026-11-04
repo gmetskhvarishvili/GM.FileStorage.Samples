@@ -51,12 +51,16 @@ public sealed class GatewayTests : IAsyncLifetime
     public async Task File_requests_are_forwarded_to_the_api_as_sent()
     {
         using var client = _gateway.CreateClient();
+        // No sign-in yet, so the caller's tenant passes through as sent (see the gateway's Program.cs).
+        var tenantId = Guid.NewGuid().ToString();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
 
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/files?tenantId=acme&userId=u1")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files?tenantId=acme", PdfForm())).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/files?contentType=application%2Fpdf")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files", PdfForm())).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files/batch", PdfForm("files"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync("/api/v1/files/6f1e0000-0000-0000-0000-000000000001")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/swagger/v1/swagger.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/files/documents/9f/9f1c.pdf?expires=1&op=read&sig=ab")).StatusCode);
 
         // Range requests pass through both ways: the header in, the 206 out.
         using var ranged = new HttpRequestMessage(HttpMethod.Get, "/api/v1/files/6f1e0000-0000-0000-0000-000000000001/content");
@@ -66,17 +70,19 @@ public sealed class GatewayTests : IAsyncLifetime
         var received = _api.Requests.ToArray();
         Assert.Equal(
             [
-                "GET /api/v1/files?tenantId=acme&userId=u1",
-                "POST /api/v1/files?tenantId=acme",
+                "GET /api/v1/files?contentType=application%2Fpdf",
+                "POST /api/v1/files",
                 "POST /api/v1/files/batch",
                 "DELETE /api/v1/files/6f1e0000-0000-0000-0000-000000000001",
                 "GET /swagger/v1/swagger.json",
+                "GET /files/documents/9f/9f1c.pdf?expires=1&op=read&sig=ab",
                 "GET /api/v1/files/6f1e0000-0000-0000-0000-000000000001/content",
             ],
             received.Select(r => $"{r.Method} {r.PathAndQuery}"));
         // Upload bodies arrive whole.
         Assert.All(received.Where(r => r.Method == "POST"), r => Assert.True(r.BodyLength > 0));
         Assert.Equal("bytes=0-99", received[^1].Range);
+        Assert.All(received, r => Assert.Equal(tenantId, r.TenantId));
     }
 
     [Theory]

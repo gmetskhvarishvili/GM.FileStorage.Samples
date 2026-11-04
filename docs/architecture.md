@@ -98,8 +98,7 @@ erDiagram
     stored_files ||--o{ stored_file_metadata : has
     stored_files {
         uuid id PK "the file's id; every route uses it"
-        string key "same as id"
-        string storage_key UK "where the bytes are, e.g. documents/9f/9f1c….pdf"
+        string storage_key UK "where the bytes are, named after the id: documents/9f/9f1c….pdf"
         string file_name
         string content_type
         bigint size
@@ -131,12 +130,16 @@ anything.
 
 ## Scaling out
 
-| Piece | One instance (the sample) | Several instances |
+Everything that has to be shared between instances switches to Redis when `Redis:ConnectionString` is set, and stays
+in memory otherwise. Compose sets it and runs two workers; `dotnet run` and the tests don't.
+
+| Piece | Without Redis (one instance) | With Redis (several instances) |
 | --- | --- | --- |
-| Gateway rate-limit counters | In-memory GM.Caching | `AddGMRedisCaching` + `AddGMRedisRateLimitStore`, so the limits are shared |
+| Gateway rate-limit counters | In-memory GM.Caching | `AddGMRedisCaching` + `AddGMRedisRateLimitStore`: every gateway counts against the same limits |
+| Per-client file count (API) | In-memory | The same Redis store: every API instance counts against the same 30 a minute |
+| Worker job lock | In-memory GM.DistributedLock | `AddGMRedisDistributedLock`: one worker runs the cleanup at a time. Claiming entries by their `due_at_utc` token keeps it safe even without a shared lock |
 | Gateway destinations | One API address | Add destinations to the `files-api` cluster; YARP balances them |
-| API | Stateless | Run as many as needed |
-| Worker | In-memory GM.DistributedLock | `GM.DistributedLock.Redis`, so one worker runs the job at a time. Claiming entries by their `due_at_utc` token keeps it safe even without a shared lock |
+| API | Stateless apart from the above | Run as many as needed. Each applies pending migrations at startup, so start one first on a new database |
 | Storage | Local folder shared by API and worker | S3 or Azure Blob; a local folder only works when every process sees the same disk |
 
 See [dependencies](dependencies.md), [user flows](user-flows.md) and [sequence diagrams](sequence-diagrams.md) for what happens on each call, and [configuration](configuration.md)

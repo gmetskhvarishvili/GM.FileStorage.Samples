@@ -7,9 +7,9 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 
 public class StoredFileSpecification : BaseSpecification<StoredFile>
 {
-    public StoredFileSpecification(Guid? id, string? tenantId, string? userId, string? folder, string? contentType,
+    public StoredFileSpecification(Guid? id, string? tenantId, string? userId, string? contentType,
         AuditDateRange dateRange, PagingOptions paging, OrderingOptions ordering,
-        VisibilityScope visibility = VisibilityScope.VisibleOnly)
+        VisibilityScope visibility = VisibilityScope.VisibleOnly, bool? integrityProblem = null)
     {
         AddVisibilityFilter(visibility);
 
@@ -25,11 +25,14 @@ public class StoredFileSpecification : BaseSpecification<StoredFile>
             AddCriteria(f => f.Metadata.Any(m =>
                 m.Name == StoredFileMetadataNames.UserId && m.Value == userId && !m.IsDeleted));
 
-        if (!string.IsNullOrWhiteSpace(folder))
-            AddCriteria(f => f.StorageKey.StartsWith(folder));
-
         if (!string.IsNullOrWhiteSpace(contentType))
             AddCriteria(f => f.ContentType == contentType);
+
+        // Files whose last integrity check found a problem (true), or none (false).
+        if (integrityProblem == true)
+            AddCriteria(f => f.IntegrityProblem != null);
+        else if (integrityProblem == false)
+            AddCriteria(f => f.IntegrityProblem == null);
 
         // The list returns each file's metadata alongside it.
         AddInclude(f => f.Metadata);

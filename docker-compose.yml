@@ -1,14 +1,19 @@
-# The whole GM.FileStorage sample: PostgreSQL, the files API, the worker and the gateway.
+# The whole GM.FileStorage sample: PostgreSQL, Redis, the files API, two workers and the gateway.
 #
 #   docker compose up -d --build        # everything; the gateway (Swagger UI at /) is on http://localhost:8080
 #   docker compose up -d postgres       # just the database, to run the projects with `dotnet run`
 #
 # Only the gateway is published, as in production: the API is reached through it. Inside the network the services
-# talk plain HTTP on port 8080. The API applies its migrations on startup; the worker retries its job every minute,
-# so it copes with starting before the schema exists.
+# talk plain HTTP on port 8080. The API applies its migrations on startup; the workers retry their job every minute,
+# so they cope with starting before the schema exists.
 #
-# Settings that live in appsecrets.json for `dotnet run` (the connection string) come from environment variables here,
-# which GM.Secrets layers over appsettings.json the same way. The credentials are the demo ones below.
+# Redis makes the stack safe to scale out: the gateway's rate-limit counts, the API's per-client file count and the
+# workers' job lock all live there, shared by every instance. Two workers run to show it: only one cleans at a time.
+# Without Redis:ConnectionString (as with `dotnet run`) each service keeps them in memory, which suits one instance.
+#
+# Settings that live in appsecrets.json for `dotnet run` (the connection string, the link-signing key) come from
+# environment variables here, which GM.Secrets layers over appsettings.json the same way. They're the demo values
+# below; use your own anywhere real.
 #
 # For `dotnet run` instead, give the API and the worker their connection string in appsecrets.json (gitignored),
 # from the committed templates:
@@ -18,7 +23,8 @@
 
 x-app-environment: &app-environment
   ConnectionStrings__ApplicationDatabase: "Host=postgres;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
-  # The storage root the API and the worker share (the file-storage volume).
+  Redis__ConnectionString: redis:6379
+  # The storage root the API and the workers share (the file-storage volume).
   FileStorage__Local__RootPath: /data/file-storage
 
 services:
@@ -39,6 +45,15 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: gm-filestorage-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build:
       context: .
@@ -48,12 +63,16 @@ services:
     environment:
       <<: *app-environment
       ASPNETCORE_ENVIRONMENT: Development
-      # The local provider's dev-only presign links, as seen through the gateway.
+      # Presigned links on local disk (downloads and direct uploads) point at the gateway, signed with this demo key
+      # (the one in appsecrets.example.json).
       FileStorage__Local__PublicBaseUrl: http://localhost:8080/files
+      FileStorage__Local__SigningKey: "qPNCcLDn8ZXoh6z8LE9rPGYNWRMaHDSWDevspFMUGewh"
     volumes:
       - gm-filestorage-files:/data/file-storage
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   worker:
@@ -61,7 +80,9 @@ services:
       context: .
       args:
         PROJECT: GM.FileStorage.Sample.Worker
-    container_name: gm-filestorage-worker
+    # No container_name, so it can run as several replicas.
+    deploy:
+      replicas: 2
     environment:
       <<: *app-environment
       DOTNET_ENVIRONMENT: Development
@@ -69,6 +90,8 @@ services:
       - gm-filestorage-files:/data/file-storage
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       api:
         condition: service_started
@@ -81,10 +104,13 @@ services:
     container_name: gm-filestorage-gateway
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      Redis__ConnectionString: redis:6379
       ReverseProxy__Clusters__files-api__Destinations__primary__Address: http://api:8080/
     ports:
       - "8080:8080"
     depends_on:
+      redis:
+        condition: service_healthy
       api:
         condition: service_started
 

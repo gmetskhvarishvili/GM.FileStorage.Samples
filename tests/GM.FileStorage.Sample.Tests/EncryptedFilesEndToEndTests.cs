@@ -28,7 +28,7 @@ namespace GM.FileStorage.Sample.Tests;
 public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "gm-fs-sample-encrypted", Guid.NewGuid().ToString("N"));
-    private readonly string _tenantId = $"t-{Guid.NewGuid():N}";
+    private readonly string _tenantId = Guid.NewGuid().ToString();
     private readonly GmWebApplicationFactory<Program> _factory;
     private bool _infraReady;
 
@@ -82,13 +82,14 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         if (!_infraReady) return;
 
         using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", _tenantId);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport number X1234567");
 
         using var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(original);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(file, "file", "passport.pdf");
-        var response = await client.PostAsync($"/api/v1/files?tenantId={_tenantId}&userId=u1", form);
+        var response = await client.PostAsync("/api/v1/files", form);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var uploaded = await response.Content.ReadFromJsonAsync<UploadResponse>();
         Assert.NotNull(uploaded);
@@ -113,5 +114,5 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/presign")).StatusCode);
     }
 
-    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
 }

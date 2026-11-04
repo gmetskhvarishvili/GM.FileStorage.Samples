@@ -33,6 +33,16 @@ public sealed class StorageCleanupJob(IServiceScopeFactory scopeFactory) : ISche
         {
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var now = DateTime.UtcNow;
+
+            // Direct uploads whose link expired without being completed: forget them. Their bytes, if any, are
+            // already queued for cleanup (due once the link expired plus the grace period).
+            var expired = await unitOfWork.DirectUploadRepository.FindAsync(x => x.ExpiresAtUtc < now, false, null, cancellationToken);
+            if (expired.Count > 0)
+            {
+                unitOfWork.DirectUploadRepository.RemoveRange(expired);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
             due = unitOfWork.StorageCleanupRepository.Query(asNoTracking: true)
                 .Where(x => x.DueAtUtc <= now)
                 .OrderBy(x => x.DueAtUtc)

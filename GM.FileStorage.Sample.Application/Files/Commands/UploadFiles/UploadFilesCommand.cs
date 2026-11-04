@@ -2,7 +2,6 @@ using FluentValidation;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Files.Commands.DiscardFiles;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.Mediator.Contracts;
 using Microsoft.Extensions.Logging;
 using System;
@@ -28,12 +27,6 @@ public class UploadFilesCommand : IRequest<IReadOnlyList<UploadFileResultDto>>
     /// number is only known at the end.
     /// </summary>
     public IAsyncEnumerable<UploadFilesItem> Files { get; set; } = AsyncEnumerable.Empty<UploadFilesItem>();
-
-    /// <summary>Tenant every file belongs to; defaults to <c>public</c>.</summary>
-    public string? TenantId { get; set; }
-
-    /// <summary>User every file belongs to; defaults to <c>anon</c>.</summary>
-    public string? UserId { get; set; }
 }
 
 /// <summary>One file of a batch.</summary>
@@ -45,14 +38,7 @@ public class UploadFilesItem
     public string? ContentType { get; set; }
 }
 
-public class UploadFilesCommandValidator : AbstractValidator<UploadFilesCommand>
-{
-    public UploadFilesCommandValidator()
-    {
-        RuleFor(x => x.TenantId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-        RuleFor(x => x.UserId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-    }
-}
+public class UploadFilesCommandValidator : AbstractValidator<UploadFilesCommand>;
 
 /// <remarks>
 /// Files are stored one after another, as they arrive. A file the caller got wrong (a validation failure or a broken
@@ -81,7 +67,7 @@ public class UploadFilesCommandHandler(IMediator mediator, ILogger<UploadFilesCo
                         $"At most {UploadFilesCommand.MaxFiles} files can be uploaded at once. Nothing was kept.");
                 }
 
-                results.Add(await UploadAsync(file, request, cancellationToken));
+                results.Add(await UploadAsync(file, cancellationToken));
             }
         }
         catch
@@ -99,15 +85,13 @@ public class UploadFilesCommandHandler(IMediator mediator, ILogger<UploadFilesCo
     }
 
     private async Task<UploadFileResultDto> UploadAsync(
-        UploadFilesItem file, UploadFilesCommand request, CancellationToken cancellationToken)
+        UploadFilesItem file, CancellationToken cancellationToken)
     {
         var command = new UploadFileCommand
         {
             Content = file.Content,
             FileName = file.FileName,
             ContentType = file.ContentType,
-            TenantId = request.TenantId,
-            UserId = request.UserId,
         };
 
         try

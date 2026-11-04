@@ -1,9 +1,11 @@
 # User flows
 
-What a caller can do with a file, and every outcome they can get back. Each flow starts at the gateway
+What a caller can do with a file, and every outcome they can get back. A caller may name its tenant in
+`X-Tenant-Id`; without it, it works in a shared space, `public`. A file only exists for the tenant that uploaded
+it, so another tenant's id (or the shared space's) answers `404`, like an unknown one. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [Direct upload](#direct-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
 All diagrams: [index](README.md)
 
 ## File lifecycle — state diagram
@@ -17,6 +19,7 @@ stateDiagram-v2
     [*] --> Live: upload (POST /files)
     Live --> Deleted: delete (DELETE /files/{id})<br/>bytes kept
     Deleted --> Live: restore (POST /files/{id}/restore)
+    Deleted --> [*]: purged by retention<br/>deleted over 30 days ago
 
     state Live {
         direction LR
@@ -31,8 +34,10 @@ stateDiagram-v2
 ```
 
 A file's content never changes after upload: there is no replace, and new content is a new file with a new id.
-A file is never removed from the catalog through the API, and its bytes are never deleted. Only the bytes of
-uploads that were never recorded are deleted, by the worker.
+A file is never removed from the catalog through the API. A deleted file keeps its bytes so it can be restored,
+until it has been deleted longer than `Retention:DeletedFileDays` (30); then the worker purges it, rows and bytes.
+The worker also checks stored bytes against the catalog every few minutes: a file whose bytes are missing, the
+wrong size or don't match its checksum is flagged (`integrityProblem`), and stays in whatever state it was.
 
 ## Gateway checks — user flow
 
@@ -66,7 +71,7 @@ files it holds.
 title: Upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> any{A file part?}
+    start([POST /api/v1/files<br/>multipart file, X-Tenant-Id?, X-User-Id?]) --> any{A file part?}
     any -- no --> n400[400 no file sent]
     any -- yes --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
@@ -77,11 +82,17 @@ flowchart TD
     saved -- no --> e500[500<br/>bytes deleted or queued]
     saved -- yes --> more{Another file part<br/>after it?}
     more -- yes --> m400[400 use /files/batch<br/>the stored file is discarded]
-    more -- no --> ok[200 id, storageKey, fileName,<br/>contentType, size, checksum]
+    more -- no --> ok[200 id, fileName,<br/>contentType, size, checksum]
     ok --> next([Keep the id: every other call uses it])
 ```
 
-Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
+The file belongs to the caller's tenant (`X-Tenant-Id`, else the shared `public` space), and only that tenant ever
+sees it. Without `X-User-Id` it is recorded as uploaded by `anon`.
+
+To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
+a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
+first is still running gets `409`, and a retry after a refusal runs again. The same holds for batch uploads and for
+starting and completing direct uploads.
 
 The file streams from the request straight into storage; nothing is buffered first. So a file over the size limit
 (50 MB) is refused as soon as it passes the limit, not after the whole upload. It also means a second file is only
@@ -94,11 +105,11 @@ seen after the first is stored: the first is then discarded (rows and bytes, not
 title: Batch upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/batch<br/>multipart files, tenantId?, userId?]) --> each[[Each file part, as it arrives]]
+    start([POST /api/v1/files/batch<br/>multipart files, X-Tenant-Id?, X-User-Id?]) --> each[[Each file part, as it arrives]]
     each --> limit{Already 20 files?}
     limit -- yes --> c400[400 too many files<br/>the stored ones are discarded]
     limit -- no --> one{Stored as<br/>POST /files would?}
-    one -- yes --> okItem[succeeded: true<br/>file: id, storageKey, …]
+    one -- yes --> okItem[succeeded: true<br/>file: id, fileName, …]
     one -- "no: validation or upload rule" --> badItem[succeeded: false<br/>error: the reason]
     one -- "no: server fault" --> errItem[succeeded: false<br/>error: try again]
     okItem --> more{More files?}
@@ -116,6 +127,34 @@ file doesn't stop the others, so the response is `200` even when some (or all) f
 each result. A 21st file is only seen after 20 are stored; they're then discarded and the batch is refused, so a
 batch is all-or-nothing about its size. The whole request is still capped at 60 MB.
 
+## Direct upload — user flow
+
+```mermaid
+---
+title: Direct upload — user flow
+---
+flowchart TD
+    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size, X-Tenant-Id?]) --> quota{Upload permit left?<br/>30 files a minute}
+    quota -- no --> q429[429 + Retry-After]
+    quota -- yes --> rules{Type allowed, size within 5 GB,<br/>links possible?}
+    rules -- no --> r400[400 with the reason<br/>e.g. encryption at rest is on]
+    rules -- yes --> link[200 uploadId, url, method, headers,<br/>expiresAtUtc]
+    link --> put([PUT the bytes to url with the headers<br/>S3 / Azure directly; local disk: the API's /files])
+    put --> done([POST …/direct-uploads/uploadId/complete])
+    done --> found{Your tenant's upload, pending<br/>and not expired?}
+    found -- "no: unknown or done" --> n404[404]
+    found -- expired --> e400[400 start again]
+    found -- yes --> there{Bytes in storage?}
+    there -- no --> t400[400 nothing uploaded yet<br/>upload stays open]
+    there -- yes --> match{Declared size, and<br/>declared type by its bytes?}
+    match -- no --> m400[400, bytes deleted<br/>start again]
+    match -- yes --> ok[200 id = uploadId, size<br/>checksum: null]
+```
+
+For files too large to send through the API. The bytes never pass through it (on S3 and Azure), so the file has
+no checksum. If the client never completes, the bytes are deleted once the link has expired. Not available with
+encryption at rest: the client can't encrypt for the API.
+
 ## List — user flow
 
 ```mermaid
@@ -123,7 +162,7 @@ batch is all-or-nothing about its size. The whole request is still capped at 60 
 title: List — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files]) --> filters[Optional filters:<br/>tenantId · userId · folder · contentType<br/>dates · visibility]
+    start([GET /api/v1/files<br/>X-Tenant-Id?]) --> filters[Optional filters:<br/>userId · contentType · integrityProblem<br/>dates · visibility]
     filters --> paging[Optional paging:<br/>currentPage · pageSize · ordering]
     paging --> res[200 page of files<br/>+ X-Pagination header]
     res --> more{More pages?}
@@ -131,7 +170,7 @@ flowchart TD
     more -- no --> done([Pick a file's id])
 ```
 
-Deleted files are left out unless `visibility` includes them. An empty page is still `200`.
+Only the caller's tenant's files are listed. Deleted files are left out unless `visibility` includes them. An empty page is still `200`.
 
 ## Details — user flow
 
@@ -142,9 +181,9 @@ title: Details — user flow
 flowchart TD
     start([GET /api/v1/files/id]) --> guid{id is a GUID?}
     guid -- no --> n404[404 no such route]
-    guid -- yes --> exists{File exists and is visible?<br/>deleted only with visibility=All}
+    guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
-    exists -- yes --> ok[200 details:<br/>storageKey, size, checksum,<br/>metadata, audit dates]
+    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>metadata, audit dates]
 ```
 
 ## Download — user flow
@@ -154,7 +193,7 @@ flowchart TD
 title: Download — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files/id/content]) --> live{Live file?}
+    start([GET /api/v1/files/id/content]) --> live{Your tenant's live file?}
     live -- no, unknown or deleted --> f404[404]
     live -- yes --> bytes{Bytes in storage?}
     bytes -- no, removed out of band --> b404[404]
@@ -175,7 +214,7 @@ come back decrypted.
 title: Delete — user flow
 ---
 flowchart TD
-    start([DELETE /api/v1/files/id]) --> live{Live file?}
+    start([DELETE /api/v1/files/id]) --> live{Your tenant's live file?}
     live -- no, unknown or already deleted --> f404[404]
     live -- yes --> ok[204 No Content]
     ok --> after([Hidden from list, download and presign<br/>bytes kept, restorable any time])
@@ -188,7 +227,7 @@ flowchart TD
 title: Restore — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/id/restore]) --> deleted{A deleted file?}
+    start([POST /api/v1/files/id/restore]) --> deleted{Your tenant's deleted file?}
     deleted -- no, unknown or live --> f404[404]
     deleted -- yes --> bytes{Its bytes still in storage?}
     bytes -- no --> b404[404]
@@ -203,15 +242,23 @@ flowchart TD
 title: Presign — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files/id/presign]) --> live{Live file?}
+    start([GET /api/v1/files/id/presign]) --> live{Your tenant's live file?}
     live -- no --> f404[404]
     live -- yes --> can{Can the storage hand out<br/>direct links?}
     can -- "no: encryption on, or Local<br/>without PublicBaseUrl" --> r400[400 with the reason<br/>download through the API instead]
     can -- "yes: S3, Azure, Local with PublicBaseUrl" --> ok[200 url, expiresAtUtc]
-    ok --> use([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
+    ok --> where{Which storage?}
+    where -- S3 / Azure --> direct([Anyone with the link fetches the bytes<br/>straight from storage until it expires])
+    where -- "Local disk" --> fetch([GET the link: gateway → /files/key])
+    fetch --> sig{Signature, expiry<br/>and op=read valid?}
+    sig -- no --> s403[403]
+    sig -- yes --> still{File still live?}
+    still -- "no, deleted since" --> d404[404]
+    still -- yes --> served[200 the file]
 ```
 
-A file's content never changes, so a link always serves the bytes that were uploaded.
+A file's content never changes, so a link always serves the bytes that were uploaded. On local disk the link is
+signed with `FileStorage:Local:SigningKey`, so it can't be pointed at another file, extended, or used to write.
 
 ## Typical session — user journey
 
@@ -221,7 +268,7 @@ journey
     section Store
       Upload passport.pdf: 5: Caller
       Upload the other scans in one batch: 4: Caller
-      Find it by tenant: 4: Caller
+      Find it in the tenant's list: 4: Caller
       Check its details: 4: Caller
     section Use
       Download it: 5: Caller
