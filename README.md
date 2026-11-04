@@ -100,6 +100,15 @@ flowchart LR
 - **Ready to scale out.** With `Redis:ConnectionString` set, the gateway's limits, the per-client file count and the
   worker's job lock live in Redis, shared by every instance (compose runs Redis and two workers). Without it each
   service keeps them in memory, which suits one instance.
+- **Integrity checks.** Every 5 minutes the worker reads a batch of stored files back (decrypted when encryption is
+  on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
+  as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
+  `integrityProblem=true`. Direct uploads, recorded without a checksum, get one here.
+- **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
+  `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
+- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged
+  and direct uploads in progress. An upload that would go past it gets a `400`, and its bytes are deleted.
+  `GET /api/v1/files/usage?tenantId=` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
@@ -206,7 +215,8 @@ because a direct link would serve ciphertext.
 | --- | --- | --- |
 | `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
 | `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=` | Paged list of files, storage key and metadata included |
+| `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of files, storage key, metadata and last integrity check included |
+| `GET` | `/api/v1/files/usage?tenantId=` | A tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
@@ -332,8 +342,9 @@ download → presign → delete (row marked deleted, bytes kept) → restore. Th
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
 the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
-uploads (start, PUT, complete, and the checks that delete mismatched bytes), the per-client file count refusing a
-batch whole, and `PUT` on a file's content being refused (405). They need PostgreSQL and
+uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
+missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
+per-client file count refusing a batch whole, and `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

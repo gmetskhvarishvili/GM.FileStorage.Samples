@@ -17,6 +17,7 @@ stateDiagram-v2
     [*] --> Live: upload (POST /files)
     Live --> Deleted: delete (DELETE /files/{id})<br/>bytes kept
     Deleted --> Live: restore (POST /files/{id}/restore)
+    Deleted --> [*]: purged by retention<br/>deleted over 30 days ago
 
     state Live {
         direction LR
@@ -31,8 +32,10 @@ stateDiagram-v2
 ```
 
 A file's content never changes after upload: there is no replace, and new content is a new file with a new id.
-A file is never removed from the catalog through the API, and its bytes are never deleted. Only the bytes of
-uploads that were never recorded are deleted, by the worker.
+A file is never removed from the catalog through the API. A deleted file keeps its bytes so it can be restored,
+until it has been deleted longer than `Retention:DeletedFileDays` (30); then the worker purges it, rows and bytes.
+The worker also checks stored bytes against the catalog every few minutes: a file whose bytes are missing, the
+wrong size or don't match its checksum is flagged (`integrityProblem`), and stays in whatever state it was.
 
 ## Gateway checks — user flow
 

@@ -47,7 +47,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 
 | Diagram | Shows |
 | --- | --- |
-| [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, deleted, restored; content never changes |
+| [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, deleted, restored, purged by retention; content never changes |
 | [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | Route match, rate limits, 429 / 502 |
 | [Upload — user flow](user-flows.md#upload--user-flow) | One file streamed, validation, upload rules, 200 / 400 |
 | [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | 1–20 files, one result each, retry the failed ones; 21+ discards and refuses |
@@ -75,6 +75,8 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Presign — sequence](sequence-diagrams.md#presign--sequence) | Signing, or why it can't, and serving a local-disk link |
 | [Encryption at rest — sequence](sequence-diagrams.md#encryption-at-rest--sequence) | Per-file key, chunked AES-GCM, ranged decryption |
 | [Storage cleanup — sequence](sequence-diagrams.md#storage-cleanup--sequence) | The worker's lock, claim, delete, back-off |
+| [Integrity check — sequence](sequence-diagrams.md#integrity-check--sequence) | Reading stored bytes back: missing, wrong size, checksum mismatch, checksums filled in |
+| [Retention — sequence](sequence-diagrams.md#retention--sequence) | Purging files deleted longer ago than retention allows |
 | [Health checks — sequence](sequence-diagrams.md#health-checks--sequence) | Gateway and API liveness and readiness |
 | [Swagger via gateway — sequence](sequence-diagrams.md#swagger-via-gateway--sequence) | UI from the gateway, document from the API |
 

@@ -43,7 +43,10 @@ flowchart LR
 | `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json |
 | `FileStorage:Local:RootPath` | | ✓ | ✓ | appsettings.json — must be the same folder |
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
-| `FileStorage:Encryption:*` (master keys) | | ✓ | | appsecrets.json |
+| `FileStorage:Encryption:*` (master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsecrets.json |
+| `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
+| `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
+| `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
 | `FileStorage:Local:SigningKey` (signs local-disk presigned links) | | ✓ | | appsecrets.json |
 | `FileStorage:Local:PublicBaseUrl` (where those links point: the gateway's `/files`) | | ✓ | | appsettings.json |
 

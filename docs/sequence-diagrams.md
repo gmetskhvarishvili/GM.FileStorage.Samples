@@ -11,13 +11,13 @@ Participants used throughout:
 | **API** | `Files API`: `FilesController` → GM.Mediator → the command or query handler |
 | **DB** | PostgreSQL, through the unit of work |
 | **Storage** | `IFileStorageService`: Local, S3 or Azure Blob, wrapped by encryption when it's on |
-| **Worker** | `StorageCleanupJob` on GM.Scheduling |
+| **Worker** | `StorageCleanupJob`, `IntegrityCheckJob` and `RetentionJob` on GM.Scheduling |
 
 The bytes (in storage) and the rows (in Postgres) can't share a transaction. Every write is ordered so that any
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [Direct upload](#direct-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [Direct upload](#direct-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -44,7 +44,7 @@ sequenceDiagram
 
     W->>Sec: appsettings.json + appsecrets.json + env
     W->>W: register persistence, file storage, lock, scheduling
-    W->>W: schedule "storage-cleanup" (cron, every minute)
+    W->>W: schedule storage-cleanup (every minute), integrity-check (every 5 minutes), retention (hourly)
 
     G->>G: load routes, cluster and rate-limit policies
     G->>G: listen on :7141
@@ -500,6 +500,70 @@ sequenceDiagram
 
 Claiming by the `due_at_utc` concurrency token means the job and an upload slower than its 15-minute grace
 period can't both act on one entry: whichever saves second fails and leaves it alone.
+
+## Integrity check — sequence
+
+The worker, every 5 minutes.
+
+```mermaid
+---
+title: Integrity check — sequence
+---
+sequenceDiagram
+    autonumber
+    participant W as IntegrityCheckJob
+    participant DB
+    participant S as Storage
+
+    W->>DB: the files checked least recently (never-checked first), 20 per run
+    loop each file, in its own scope
+        W->>S: DownloadAsync (decrypted when encryption is on)
+        alt object missing
+            W->>DB: problem = bytes missing
+        else read
+            W->>W: hash and count the bytes as they stream
+            alt fails decryption
+                W->>DB: problem = altered or truncated
+            else wrong size
+                W->>DB: problem = size differs from the record
+            else no checksum recorded yet (a direct upload)
+                W->>DB: record the checksum, no problem
+            else checksum differs
+                W->>DB: problem = checksum mismatch
+            else matches
+                W->>DB: no problem
+            end
+        end
+        W->>DB: verified_at_utc = now
+    end
+```
+
+A storage error that isn't a verdict on the bytes (the service didn't answer) records nothing, and the file is
+tried again next run. Problems show as `integrityProblem` in details and the list, and the list filters on them.
+
+## Retention — sequence
+
+The worker, hourly.
+
+```mermaid
+---
+title: Retention — sequence
+---
+sequenceDiagram
+    autonumber
+    participant W as RetentionJob
+    participant DB
+    participant S as Storage
+
+    W->>DB: deleted files with deleted_at_utc older than 30 days, 100 per run
+    W->>DB: one transaction: remove their rows and metadata,<br/>queue each storage key for cleanup (due now)
+    W->>S: delete the bytes
+    alt a delete failed
+        Note over W,DB: left queued for the storage-cleanup job
+    end
+```
+
+`Retention:DeletedFileDays` set to 0 keeps deleted files forever.
 
 ## Health checks — sequence
 
