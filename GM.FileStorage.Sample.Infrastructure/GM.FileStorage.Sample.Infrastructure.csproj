@@ -16,7 +16,7 @@
         <PackageReference Include="GM.FileStorage" Version="3.0.0" />
         <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
         <PackageReference Include="GM.FileStorage.Local" Version="3.0.0" />
-        <PackageReference Include="GM.FileStorage.S3" Version="2.2.0" />
+        <PackageReference Include="GM.FileStorage.S3" Version="3.0.0" />
         <PackageReference Include="GM.FileStorage.AzureBlob" Version="3.0.0" />
         <PackageReference Include="GM.FileStorage.Encryption" Version="3.0.0" />
         <PackageReference Include="GM.HealthChecks.EntityFramework" Version="1.0.2" />
