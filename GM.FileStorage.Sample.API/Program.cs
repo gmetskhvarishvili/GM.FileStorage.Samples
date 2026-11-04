@@ -1,4 +1,5 @@
 using GM.API.Startup;
+using GM.FileStorage.Sample.API.Files;
 using GM.FileStorage.Sample.API.Files.Multipart;
 using GM.FileStorage.Sample.Infrastructure;
 using GM.FileStorage.Sample.Persistence;
@@ -30,6 +31,9 @@ builder.Services.Configure<SwaggerGenOptions>(options => options.OperationFilter
 // The catalog (stored files + their metadata rows) in PostgreSQL, and the storage backends + key strategy.
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Counts uploaded files per client (RateLimiting:Policies:uploaded-files).
+builder.Services.AddScoped<UploadQuota>();
 
 var app = builder.Build();
 

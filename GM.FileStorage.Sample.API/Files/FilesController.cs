@@ -3,9 +3,11 @@ using GM.API.Controllers;
 using GM.API.Models;
 using GM.Exceptions;
 using GM.FileStorage.Sample.API.Files.Multipart;
+using GM.FileStorage.Sample.Application.Files.Commands.CompleteDirectUpload;
 using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
 using GM.FileStorage.Sample.Application.Files.Commands.DiscardFiles;
 using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
+using GM.FileStorage.Sample.Application.Files.Commands.StartDirectUpload;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFiles;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
@@ -34,7 +36,8 @@ namespace GM.FileStorage.Sample.API.Files;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}")]
-public class FilesController : BaseController
+[TooManyUploads]
+public class FilesController(UploadQuota quota) : BaseController
 {
     /// <summary>
     /// Upload File
@@ -63,6 +66,7 @@ public class FilesController : BaseController
         await using var files = MultipartFiles.ReadAsync(Request, cancellationToken).GetAsyncEnumerator(cancellationToken);
         if (!await files.MoveNextAsync())
             throw new BadRequestException("No file was sent.");
+        await quota.TakeAsync(HttpContext, cancellationToken);
 
         var command = request.Adapt<UploadFileCommand>();
         command.Content = files.Current.Content;
@@ -119,13 +123,70 @@ public class FilesController : BaseController
     {
         var command = new UploadFilesCommand
         {
-            Files = MultipartFiles.ReadAsync(Request, cancellationToken),
+            // Each file takes an upload permit as it arrives; past the limit the batch is refused whole.
+            Files = quota.CountAsync(MultipartFiles.ReadAsync(Request, cancellationToken), HttpContext, cancellationToken),
             TenantId = request.TenantId,
             UserId = request.UserId,
         };
 
         var response = await Mediator.Send(command, cancellationToken);
         var result = response.Adapt<IEnumerable<UploadFileResultModel>>();
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Start A Direct Upload
+    /// </summary>
+    /// <remarks>
+    /// For files too large to send through the API (up to <c>DirectUploads:MaxFileSize</c>, 5 GB). Returns a presigned
+    /// link: send the bytes there with the given method and headers (straight to S3 or Azure; on local disk, to the
+    /// API's <c>/files</c>), then call <c>POST files/direct-uploads/{uploadId}/complete</c> before
+    /// <c>expiresAtUtc</c>. The declared size and content type are checked now and again against what was stored.
+    /// Not available with encryption at rest. Counts as one upload against the per-client limit.
+    /// </remarks>
+    /// <param name="body">The file's name, content type and exact size</param>
+    /// <param name="request">Tenant and user (query string)</param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>The upload id, the link, and how to send to it</returns>
+    [HttpPost("files/direct-uploads", Name = nameof(StartDirectUpload))]
+    [ProducesResponseType(typeof(DirectUploadModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    public async Task<IActionResult> StartDirectUpload(
+        [FromBody] StartDirectUploadModel body,
+        [FromQuery] UploadFileModel request,
+        CancellationToken cancellationToken)
+    {
+        await quota.TakeAsync(HttpContext, cancellationToken);
+
+        var command = body.Adapt<StartDirectUploadCommand>();
+        command.TenantId = request.TenantId;
+        command.UserId = request.UserId;
+        var response = await Mediator.Send(command, cancellationToken);
+        var result = response.Adapt<DirectUploadModel>();
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Complete A Direct Upload
+    /// </summary>
+    /// <remarks>
+    /// After the bytes were sent to the link: checks the stored object (it exists, has the declared size and, with
+    /// content checks on, the declared type) and records the file. A mismatch deletes the bytes and answers 400.
+    /// </remarks>
+    /// <param name="uploadId">The id from <c>POST files/direct-uploads</c></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns>The stored file's id, storage key, size and content type (no checksum: the API never read the bytes)</returns>
+    [HttpPost("files/direct-uploads/{uploadId:guid}/complete", Name = nameof(CompleteDirectUpload))]
+    [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CompleteDirectUpload(
+        [FromRoute] Guid uploadId,
+        CancellationToken cancellationToken)
+    {
+        var response = await Mediator.Send(new CompleteDirectUploadCommand { UploadId = uploadId }, cancellationToken);
+        var result = response.Adapt<UploadedFileModel>();
         return Ok(result);
     }
 

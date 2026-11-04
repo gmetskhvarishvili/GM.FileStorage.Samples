@@ -1,9 +1,12 @@
 using System;
 using GM.Caching;
+using GM.Caching.Redis;
 using GM.DistributedLock;
+using GM.DistributedLock.Redis;
 using GM.Gateway;
 using GM.HealthChecks;
 using GM.RateLimiting.Http;
+using GM.RateLimiting.Redis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
@@ -16,11 +19,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<KestrelServerOptions>(builder.Configuration.GetSection("Kestrel"));
 
 // ---------------------------------------------------------------------------------------------
-// Counter store + lock for edge rate limiting. In-memory suits one gateway instance; with several,
-// use AddGMRedisCaching + AddGMRedisRateLimitStore so the limits are shared.
+// Counter store + lock for edge rate limiting: Redis when Redis:ConnectionString is set, so several
+// gateway instances share one count per client; otherwise in-memory, which suits one instance.
 // ---------------------------------------------------------------------------------------------
-builder.Services.AddGMCaching();
-builder.Services.AddGMDistributedLock();
+var redis = !string.IsNullOrWhiteSpace(builder.Configuration["Redis:ConnectionString"]);
+if (redis)
+{
+    builder.Services.AddGMRedisCaching(builder.Configuration);
+    builder.Services.AddGMRedisDistributedLock(builder.Configuration);
+}
+else
+{
+    builder.Services.AddGMCaching();
+    builder.Services.AddGMDistributedLock();
+}
 
 // ---------------------------------------------------------------------------------------------
 // YARP reverse proxy + GM rate limiting, both from configuration (see appsettings.json): every route
@@ -30,6 +42,8 @@ builder.Services.AddGMDistributedLock();
 builder.Services.AddGMGateway(
     builder.Configuration,
     configureHttp: options => options.DefaultPartition = RateLimitPartition.Ip);
+if (redis)
+    builder.Services.AddGMRedisRateLimitStore(); // atomic counts in Redis, on the connection AddGMRedisCaching opened
 
 // ---------------------------------------------------------------------------------------------
 // Health: liveness is the gateway itself; readiness also needs the files API to be up.

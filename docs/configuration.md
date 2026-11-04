@@ -35,7 +35,9 @@ flowchart LR
 | Setting | Gateway | API | Worker | Where |
 | --- | :-: | :-: | :-: | --- |
 | `ReverseProxy:*` (routes, cluster address) | ✓ | | | appsettings.json |
-| `RateLimiting:Policies:*` | ✓ | | | appsettings.json |
+| `RateLimiting:Policies:*`: the gateway's per-request limits, the API's `uploaded-files` (30 files a minute per client) | ✓ | ✓ | | appsettings.json |
+| `Redis:ConnectionString` (share limits, counts and the job lock across instances; unset: in memory) | ✓ | ✓ | ✓ | environment / appsecrets.json |
+| `DirectUploads:MaxFileSize` (5 GB), `DirectUploads:LinkExpiry` (1 hour) | | ✓ | | appsettings.json |
 | `Kestrel:Limits:MaxRequestBodySize` (60 MB) | ✓ | ✓ | | appsettings.json |
 | `ConnectionStrings:ApplicationDatabase` | | ✓ | ✓ | appsecrets.json |
 | `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json |
@@ -66,6 +68,8 @@ Routes are matched in order of specificity; each names a rate-limit policy and t
 | `files-upload` | `POST /api/{version}/files` | `uploads` |
 | `files-batch-upload` | `POST /api/{version}/files/batch` | `uploads` |
 | `files` | `/api/{version}/files/{**catch-all}` | `api` |
+| `files-direct-upload-start` | `POST /api/{version}/files/direct-uploads` | `uploads` |
+| `files-presigned-write` | `PUT /files/{**catch-all}` (local-disk direct uploads) | `uploads` |
 | `files-presigned` | `GET /files/{**catch-all}` (local-disk presigned links) | `api` |
 | `files-api-docs` | `GET /swagger/{**catch-all}` | none |
 

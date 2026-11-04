@@ -2,7 +2,13 @@ using GM.FileStorage.AzureBlob;
 using GM.FileStorage.Encryption;
 using GM.FileStorage.Local;
 using GM.FileStorage.S3;
+using GM.Caching;
+using GM.Caching.Redis;
 using GM.DistributedLock;
+using GM.DistributedLock.Redis;
+using GM.FileStorage.Sample.Application.Common;
+using GM.RateLimiting;
+using GM.RateLimiting.Redis;
 using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.HealthChecks.EntityFramework;
@@ -25,6 +31,16 @@ public static class DependencyInjection
         // encrypted with its own AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
         services.AddGMFileStorageEncryption(configuration);
 
+        // Large files written straight into storage through presigned links (DirectUploads in appsettings.json).
+        services.Configure<DirectUploadOptions>(configuration.GetSection("DirectUploads"));
+
+        // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json), across instances when
+        // Redis is configured: the gateway limits requests, but a batch holds up to 20 files.
+        var redis = AddCoordination(services, configuration);
+        services.AddGMRateLimiting(configuration.GetSection("RateLimiting"));
+        if (redis)
+            services.AddGMRedisRateLimitStore();
+
         // Readiness: /health/ready fails while the catalog database is unreachable.
         services.AddHealthChecks()
             .AddGMDatabaseCheck<ApplicationDbContext>();
@@ -42,12 +58,31 @@ public static class DependencyInjection
     {
         AddFileStorage(services, configuration);
 
-        // One run per minute cluster-wide: the in-memory lock suits a single worker; use GM.DistributedLock.Redis when
-        // running several.
-        services.AddGMDistributedLock();
+        // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
+        // configured) so several workers never clean at the same time.
+        AddCoordination(services, configuration);
         services.AddGMScheduling(builder => builder.ScanAssemblies(typeof(StorageCleanupJob).Assembly));
 
         return services;
+    }
+
+    /// <summary>
+    /// The cache and distributed lock that rate limiting and scheduling build on: Redis when
+    /// <c>Redis:ConnectionString</c> is set, so every instance shares them, otherwise in-memory (one instance). Returns
+    /// whether Redis is used.
+    /// </summary>
+    public static bool AddCoordination(IServiceCollection services, IConfiguration configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration["Redis:ConnectionString"]))
+        {
+            services.AddGMCaching();
+            services.AddGMDistributedLock();
+            return false;
+        }
+
+        services.AddGMRedisCaching(configuration);
+        services.AddGMRedisDistributedLock(configuration);
+        return true;
     }
 
     // All three backends are registered; FileStorage:Provider (default "Local") decides which one IFileStorageService

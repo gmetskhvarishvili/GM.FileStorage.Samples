@@ -38,19 +38,5 @@ public sealed class StreamedMultipartUploadAttribute(string fieldName) : Attribu
     {
     }
 
-    public void OnException(ExceptionContext context)
-    {
-        if (context.Exception is not BadHttpRequestException badRequest)
-            return;
-
-        context.Result = new ObjectResult(new ProblemDetails
-        {
-            Status = badRequest.StatusCode,
-            Title = "The request body couldn't be read.",
-            Detail = badRequest.Message,
-            Instance = context.HttpContext.Request.Path,
-        })
-        { StatusCode = badRequest.StatusCode };
-        context.ExceptionHandled = true;
-    }
+    public void OnException(ExceptionContext context) => RequestBodyErrorsAttribute.Handle(context);
 }

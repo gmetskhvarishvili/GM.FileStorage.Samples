@@ -1,4 +1,5 @@
 using GM.EntityFramework.Persistence;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.DirectUploadAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate.Interfaces;
@@ -11,10 +12,12 @@ public sealed class UnitOfWork(
     ApplicationDbContext context,
     IStoredFileRepository storedFileRepository,
     IStoredFileMetadataRepository storedFileMetadataRepository,
-    IStorageCleanupRepository storageCleanupRepository)
+    IStorageCleanupRepository storageCleanupRepository,
+    IDirectUploadRepository directUploadRepository)
     : GenericUnitOfWork<ApplicationDbContext>(context), IUnitOfWork
 {
     public IStoredFileRepository StoredFileRepository { get; } = storedFileRepository;
     public IStoredFileMetadataRepository StoredFileMetadataRepository { get; } = storedFileMetadataRepository;
     public IStorageCleanupRepository StorageCleanupRepository { get; } = storageCleanupRepository;
+    public IDirectUploadRepository DirectUploadRepository { get; } = directUploadRepository;
 }

@@ -18,4 +18,7 @@ public static class FileStorageTableNames
 
     /// <summary>The sample's own table: storage objects queued for deletion.</summary>
     public const string StorageCleanups = "storage_cleanups";
+
+    /// <summary>The sample's own table: large files being written straight into storage, not yet recorded.</summary>
+    public const string DirectUploads = "direct_uploads";
 }

@@ -89,6 +89,17 @@ flowchart LR
 - **Refusing a request after storing part of it.** Streaming means a second file (on the single endpoint) or a 21st
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
+- **Files counted per client, not requests.** Every uploaded file takes a permit from
+  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single, batch and direct uploads alike: a batch of
+  20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
+  limits requests on top.
+- **Direct uploads for large files.** `POST /files/direct-uploads` returns a presigned write link (up to 5 GB, an hour
+  to use it); the client sends the bytes straight to S3 or Azure, then completes the upload. The API checks the stored
+  object (size, and its first bytes against the declared type) before recording it, and deletes what doesn't match.
+  On local disk the link is signed and the API's `/files` takes the PUT. Not available with encryption at rest.
+- **Ready to scale out.** With `Redis:ConnectionString` set, the gateway's limits, the per-client file count and the
+  worker's job lock live in Redis, shared by every instance (compose runs Redis and two workers). Without it each
+  service keeps them in memory, which suits one instance.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
@@ -201,7 +212,10 @@ because a direct link would serve ciphertext.
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
+| `POST` | `/api/v1/files/direct-uploads?tenantId=&userId=` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
+| `POST` | `/api/v1/files/direct-uploads/{uploadId}/complete` | After sending the bytes: checks the stored object and records the file (`400` and deleted if it doesn't match) |
 | `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
+| `PUT` | `/files/{storageKey}?expires=&op=write&sig=` | Takes a local-disk direct upload's bytes (S3 and Azure take theirs themselves) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
@@ -292,8 +306,9 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 
 ## Running in Docker
 
-`docker-compose.yml` runs the whole sample: PostgreSQL, the API, the worker and the gateway, built from the one
-`Dockerfile` (its `PROJECT` build argument picks the host).
+`docker-compose.yml` runs the whole sample: PostgreSQL, Redis, the API, two workers and the gateway, built from the
+one `Dockerfile` (its `PROJECT` build argument picks the host). With Redis the rate limits, the per-client file count
+and the job lock are shared, so the two workers never clean at the same time.
 
 ```bash
 docker compose up -d --build
@@ -316,7 +331,9 @@ against a throwaway storage root and drive it over HTTP: upload → list by tena
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
-the upload rules, the cleanup job, and `PUT` on a file's content being refused (405). They need PostgreSQL and
+the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
+uploads (start, PUT, complete, and the checks that delete mismatched bytes), the per-client file count refusing a
+batch whole, and `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 

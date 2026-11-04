@@ -23,6 +23,13 @@
         <!-- The storage-cleanup job: GM.Scheduling, single-run per minute via an (in-memory) GM.DistributedLock. -->
         <PackageReference Include="GM.Scheduling" Version="1.0.0" />
         <PackageReference Include="GM.DistributedLock" Version="1.0.2" />
+        <!-- Redis variants: shared rate-limit counts and locks when several instances run (Redis:ConnectionString). -->
+        <PackageReference Include="GM.DistributedLock.Redis" Version="1.0.2" />
+        <PackageReference Include="GM.Caching" Version="1.0.1" />
+        <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
+        <!-- Counts uploaded files per client. -->
+        <PackageReference Include="GM.RateLimiting" Version="1.0.1" />
+        <PackageReference Include="GM.RateLimiting.Redis" Version="1.0.1" />
     </ItemGroup>
 
 </Project>
