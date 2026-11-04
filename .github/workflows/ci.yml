@@ -80,8 +80,11 @@ jobs:
 
       - name: The API and the workers share the storage volume and Redis
         run: |
-          docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .
-          docker compose exec -T --index 2 worker find /data/file-storage -name '*.pdf' | grep -q .
+          docker compose exec -T api find /data/file-storage -type f ! -name '*.gmmeta' | grep -q .
+          docker compose exec -T --index 2 worker find /data/file-storage -type f ! -name '*.gmmeta' | grep -q .
+          # Storage gives nothing away: no extensions, nothing naming the uploaded file, no plaintext PDF.
+          ! docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .
+          ! docker compose exec -T api grep -rlq -e 'smoke.pdf' -e '%PDF' /data/file-storage
           # Both workers scheduled the job; the lock they share (and the rate-limit counts) live in Redis.
           test "$(docker compose ps -q worker | wc -l)" = 2
           test "$(docker compose logs worker | grep -c "Scheduled job 'storage-cleanup'")" -ge 2
