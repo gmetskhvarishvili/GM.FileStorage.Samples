@@ -1,6 +1,6 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.FileStorage.Sample.Application.Common;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using Microsoft.Extensions.Options;
@@ -9,30 +9,22 @@ using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Application.Files.Queries.GetTenantUsage;
 
-/// <summary>How much of its storage quota a tenant uses.</summary>
-public class GetTenantUsageQuery : IRequest<TenantUsageDto>
-{
-    public string? TenantId { get; set; }
-}
+/// <summary>How much of its storage quota the caller's tenant uses.</summary>
+public class GetTenantUsageQuery : IRequest<TenantUsageDto>;
 
-public class GetTenantUsageQueryValidator : AbstractValidator<GetTenantUsageQuery>
-{
-    public GetTenantUsageQueryValidator()
-    {
-        RuleFor(x => x.TenantId).NotEmpty().MaximumLength(StoredFileMetadata.ValueMaxLength);
-    }
-}
+public class GetTenantUsageQueryValidator : AbstractValidator<GetTenantUsageQuery>;
 
-public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOptions> quota)
+public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOptions> quota, ICurrentActor actor)
     : IRequestHandler<GetTenantUsageQuery, TenantUsageDto>
 {
     public async Task<TenantUsageDto> Handle(GetTenantUsageQuery request, CancellationToken cancellationToken)
     {
-        var (used, files) = await TenantQuota.UsageAsync(unitOfWork, request.TenantId!, cancellationToken);
+        var tenantId = actor.RequireTenant();
+        var (used, files) = await TenantQuota.UsageAsync(unitOfWork, tenantId, cancellationToken);
         var limit = quota.Value.BytesPerTenant;
         return new TenantUsageDto
         {
-            TenantId = request.TenantId,
+            TenantId = tenantId,
             UsedBytes = used,
             QuotaBytes = limit > 0 ? limit : null,
             FileCount = files,

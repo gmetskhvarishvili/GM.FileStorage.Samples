@@ -1,4 +1,5 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
@@ -26,12 +27,6 @@ public class UploadFileCommand : IRequest<UploadedFileDto>
     public Stream? Content { get; set; }
     public string? FileName { get; set; }
     public string? ContentType { get; set; }
-
-    /// <summary>Tenant the file belongs to; defaults to <c>public</c>.</summary>
-    public string? TenantId { get; set; }
-
-    /// <summary>User the file belongs to; defaults to <c>anon</c>.</summary>
-    public string? UserId { get; set; }
 }
 
 public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
@@ -41,8 +36,6 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
         RuleFor(x => x.Content).NotNull();
         RuleFor(x => x.FileName).NotNull().NotEmpty().MaximumLength(StoredFile.FileNameMaxLength);
         RuleFor(x => x.ContentType).NotNull().NotEmpty().MaximumLength(StoredFile.ContentTypeMaxLength);
-        RuleFor(x => x.TenantId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-        RuleFor(x => x.UserId).MaximumLength(StoredFileMetadata.ValueMaxLength);
     }
 }
 
@@ -61,16 +54,17 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// </list>
 /// </remarks>
 public class UploadFileCommandHandler(
-    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota)
+    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota,
+    ICurrentActor actor)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // Tenant and user travel as upload metadata, kept by the catalog as searchable rows.
+        // The caller's tenant and user travel as upload metadata, kept by the catalog as searchable rows.
         var metadata = new Dictionary<string, string>
         {
-            [StoredFileMetadataNames.TenantId] = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId,
-            [StoredFileMetadataNames.UserId] = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId,
+            [StoredFileMetadataNames.TenantId] = actor.RequireTenant(),
+            [StoredFileMetadataNames.UserId] = actor.UserOrAnonymous(),
         };
 
         // Where these bytes go: a path from FileStorage:KeyTemplate. It's needed before the upload (it's queued

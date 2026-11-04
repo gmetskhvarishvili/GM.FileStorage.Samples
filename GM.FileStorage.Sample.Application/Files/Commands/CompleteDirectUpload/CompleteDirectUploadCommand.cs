@@ -1,3 +1,4 @@
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
@@ -35,13 +36,16 @@ public class CompleteDirectUploadCommandHandler(
     IUnitOfWork unitOfWork,
     IFileStorageService storage,
     IOptions<FileStorageOptions> storageOptions,
-    IOptions<DirectUploadOptions> options)
+    IOptions<DirectUploadOptions> options,
+    ICurrentActor actor)
     : IRequestHandler<CompleteDirectUploadCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(CompleteDirectUploadCommand request, CancellationToken cancellationToken)
     {
+        // Only the tenant that started the upload can complete it.
+        var tenantId = actor.RequireTenant();
         var upload = await unitOfWork.DirectUploadRepository
-            .FirstOrDefaultAsync(x => x.Id == request.UploadId, false, null, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == request.UploadId && x.TenantId == tenantId, false, null, cancellationToken)
             ?? throw new NotFoundException(StringResource.File, StringResource.Id, request.UploadId);
 
         if (upload.ExpiresAtUtc < DateTime.UtcNow)

@@ -1,6 +1,8 @@
 # User flows
 
-What a caller can do with a file, and every outcome they can get back. Each flow starts at the gateway
+What a caller can do with a file, and every outcome they can get back. Every `/api/v1` call names the caller's
+tenant in `X-Tenant-Id` (without it: `400`); a file only exists for the tenant that uploaded it, so another
+tenant's id answers `404`, like an unknown one. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
 **Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [Direct upload](#direct-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
@@ -69,7 +71,9 @@ files it holds.
 title: Upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files<br/>multipart file, tenantId?, userId?]) --> any{A file part?}
+    start([POST /api/v1/files<br/>multipart file, X-Tenant-Id, X-User-Id?]) --> tenant{X-Tenant-Id sent?}
+    tenant -- no --> t400[400 send X-Tenant-Id]
+    tenant -- yes --> any{A file part?}
     any -- no --> n400[400 no file sent]
     any -- yes --> valid{File name, content type<br/>and ids valid?}
     valid -- no --> v400[400 validation errors]
@@ -84,7 +88,8 @@ flowchart TD
     ok --> next([Keep the id: every other call uses it])
 ```
 
-Without `tenantId` / `userId` the file is recorded under `public` / `anon`.
+The file belongs to the caller's tenant (`X-Tenant-Id`), and only that tenant ever sees it. Without `X-User-Id`
+it is recorded as uploaded by `anon`.
 
 To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
 a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
@@ -102,7 +107,9 @@ seen after the first is stored: the first is then discarded (rows and bytes, not
 title: Batch upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/batch<br/>multipart files, tenantId?, userId?]) --> each[[Each file part, as it arrives]]
+    start([POST /api/v1/files/batch<br/>multipart files, X-Tenant-Id, X-User-Id?]) --> tenant{X-Tenant-Id sent?}
+    tenant -- no --> t400[400 send X-Tenant-Id]
+    tenant -- yes --> each[[Each file part, as it arrives]]
     each --> limit{Already 20 files?}
     limit -- yes --> c400[400 too many files<br/>the stored ones are discarded]
     limit -- no --> one{Stored as<br/>POST /files would?}
@@ -131,14 +138,14 @@ batch is all-or-nothing about its size. The whole request is still capped at 60 
 title: Direct upload — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size]) --> quota{Upload permit left?<br/>30 files a minute}
+    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size, X-Tenant-Id]) --> quota{Upload permit left?<br/>30 files a minute}
     quota -- no --> q429[429 + Retry-After]
     quota -- yes --> rules{Type allowed, size within 5 GB,<br/>links possible?}
     rules -- no --> r400[400 with the reason<br/>e.g. encryption at rest is on]
     rules -- yes --> link[200 uploadId, url, method, headers,<br/>expiresAtUtc]
     link --> put([PUT the bytes to url with the headers<br/>S3 / Azure directly; local disk: the API's /files])
     put --> done([POST …/direct-uploads/uploadId/complete])
-    done --> found{Upload pending<br/>and not expired?}
+    done --> found{Your tenant's upload, pending<br/>and not expired?}
     found -- "no: unknown or done" --> n404[404]
     found -- expired --> e400[400 start again]
     found -- yes --> there{Bytes in storage?}
@@ -159,7 +166,7 @@ encryption at rest: the client can't encrypt for the API.
 title: List — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files]) --> filters[Optional filters:<br/>tenantId · userId · folder · contentType<br/>dates · visibility]
+    start([GET /api/v1/files<br/>X-Tenant-Id]) --> filters[Optional filters:<br/>userId · folder · contentType<br/>dates · visibility]
     filters --> paging[Optional paging:<br/>currentPage · pageSize · ordering]
     paging --> res[200 page of files<br/>+ X-Pagination header]
     res --> more{More pages?}
@@ -167,7 +174,7 @@ flowchart TD
     more -- no --> done([Pick a file's id])
 ```
 
-Deleted files are left out unless `visibility` includes them. An empty page is still `200`.
+Only the caller's tenant's files are listed. Deleted files are left out unless `visibility` includes them. An empty page is still `200`.
 
 ## Details — user flow
 
@@ -178,7 +185,7 @@ title: Details — user flow
 flowchart TD
     start([GET /api/v1/files/id]) --> guid{id is a GUID?}
     guid -- no --> n404[404 no such route]
-    guid -- yes --> exists{File exists and is visible?<br/>deleted only with visibility=All}
+    guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
     exists -- yes --> ok[200 details:<br/>storageKey, size, checksum,<br/>metadata, audit dates]
 ```
@@ -190,7 +197,7 @@ flowchart TD
 title: Download — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files/id/content]) --> live{Live file?}
+    start([GET /api/v1/files/id/content]) --> live{Your tenant's live file?}
     live -- no, unknown or deleted --> f404[404]
     live -- yes --> bytes{Bytes in storage?}
     bytes -- no, removed out of band --> b404[404]
@@ -211,7 +218,7 @@ come back decrypted.
 title: Delete — user flow
 ---
 flowchart TD
-    start([DELETE /api/v1/files/id]) --> live{Live file?}
+    start([DELETE /api/v1/files/id]) --> live{Your tenant's live file?}
     live -- no, unknown or already deleted --> f404[404]
     live -- yes --> ok[204 No Content]
     ok --> after([Hidden from list, download and presign<br/>bytes kept, restorable any time])
@@ -224,7 +231,7 @@ flowchart TD
 title: Restore — user flow
 ---
 flowchart TD
-    start([POST /api/v1/files/id/restore]) --> deleted{A deleted file?}
+    start([POST /api/v1/files/id/restore]) --> deleted{Your tenant's deleted file?}
     deleted -- no, unknown or live --> f404[404]
     deleted -- yes --> bytes{Its bytes still in storage?}
     bytes -- no --> b404[404]
@@ -239,7 +246,7 @@ flowchart TD
 title: Presign — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files/id/presign]) --> live{Live file?}
+    start([GET /api/v1/files/id/presign]) --> live{Your tenant's live file?}
     live -- no --> f404[404]
     live -- yes --> can{Can the storage hand out<br/>direct links?}
     can -- "no: encryption on, or Local<br/>without PublicBaseUrl" --> r400[400 with the reason<br/>download through the API instead]
@@ -265,7 +272,7 @@ journey
     section Store
       Upload passport.pdf: 5: Caller
       Upload the other scans in one batch: 4: Caller
-      Find it by tenant: 4: Caller
+      Find it in the tenant's list: 4: Caller
       Check its details: 4: Caller
     section Use
       Download it: 5: Caller

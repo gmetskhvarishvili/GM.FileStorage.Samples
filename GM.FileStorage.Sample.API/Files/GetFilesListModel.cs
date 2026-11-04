@@ -6,16 +6,12 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GM.FileStorage.Sample.API.Files;
 
-/// <summary>Get files list model.</summary>
+/// <summary>Get files list model: the caller's tenant's files (<c>X-Tenant-Id</c>).</summary>
 public class GetFilesListModel : GetBaseListModel
 {
     /// <summary>The id of the stored file.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "Id")]
     public Guid? Id { get; set; }
-
-    /// <summary>Only files uploaded for this tenant.</summary>
-    [Display(ResourceType = typeof(StringResource), Name = "TenantId")]
-    public string? TenantId { get; set; }
 
     /// <summary>Only files uploaded for this user.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "UserId")]

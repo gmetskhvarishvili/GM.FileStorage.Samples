@@ -1,7 +1,9 @@
 using FluentValidation;
 using GM.API.Application.Models;
 using GM.EntityFramework.Domain.Specifications;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
+using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
@@ -26,13 +28,14 @@ public class GetFileDetailsQueryValidator : AbstractValidator<GetFileDetailsQuer
     }
 }
 
-public class GetFileDetailsQueryHandler(IUnitOfWork unitOfWork)
+public class GetFileDetailsQueryHandler(IUnitOfWork unitOfWork, ICurrentActor actor)
     : IRequestHandler<GetFileDetailsQuery, StoredFileDetailsDto>
 {
     public async Task<StoredFileDetailsDto> Handle(GetFileDetailsQuery request, CancellationToken cancellationToken)
     {
         var entity = await unitOfWork.StoredFileRepository
             .Query(true, null)
+            .OwnedBy(actor.RequireTenant())
             .Include(x => x.Metadata)
             .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && (request.Visibility.HasFlag(VisibilityScope.IncludeInactive) || x.IsActive)

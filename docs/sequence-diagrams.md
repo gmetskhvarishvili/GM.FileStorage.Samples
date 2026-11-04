@@ -103,7 +103,7 @@ sequenceDiagram
 
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
-    API->>API: validate (file name, content type, ids)
+    API->>API: validate (file name, content type), tenant from X-Tenant-Id
     API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
@@ -117,7 +117,7 @@ sequenceDiagram
         S-->>API: size, checksum, content type
         API->>DB: BEGIN
         API->>DB: insert stored_files (id, storage key, …)
-        API->>DB: insert stored_file_metadata (tenantId, userId)
+        API->>DB: insert stored_file_metadata (the caller's tenantId, userId)
         API->>DB: delete the queued entry
         API->>DB: insert domain event (uploaded)
         API->>DB: COMMIT
@@ -159,14 +159,14 @@ sequenceDiagram
     participant DB
     participant S as Storage
 
-    C->>B: UploadFilesCommand (file parts as they arrive, tenantId, userId)
-    B->>B: validate: tenantId, userId
+    C->>B: UploadFilesCommand (file parts as they arrive)
+    B->>B: the caller has a tenant (X-Tenant-Id), else 400
     loop each file part, as it arrives off the request
         alt already 20 files
             B->>DB: discard the stored files (rows removed, bytes queued and deleted)
             B-->>C: BadRequestException → 400, nothing kept
         end
-        B->>U: UploadFileCommand (same tenant and user)
+        B->>U: UploadFileCommand (the caller's tenant and user)
         U->>DB: queue the storage key
         U->>S: upload (rules checked)
         U->>DB: one transaction: file row, metadata, drop the queued entry
@@ -234,7 +234,7 @@ cleanup entry queued at the start.
 
 ## List — sequence
 
-`GET /api/v1/files?tenantId=&userId=&folder=&contentType=&currentPage=&pageSize=`
+`GET /api/v1/files?userId=&folder=&contentType=&currentPage=&pageSize=` with `X-Tenant-Id`
 
 ```mermaid
 ---
@@ -245,7 +245,7 @@ sequenceDiagram
     participant API
     participant DB
 
-    API->>API: build StoredFileSpecification<br/>(tenant, user, folder, content type, dates, visibility)
+    API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, folder, content type, dates, visibility)
     opt total count requested
         API->>DB: SELECT count(*) … WHERE metadata EXISTS (name, value) …
     end
@@ -255,7 +255,7 @@ sequenceDiagram
     API-->>API: 200 [files] + X-Pagination
 ```
 
-Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
+The tenant is always the caller's. Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
 The folder filter is a prefix match on the storage key.
 
 ## Details — sequence

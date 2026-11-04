@@ -65,38 +65,46 @@ jobs:
           exit 1
 
       - name: Upload, list and download through the gateway
+        env:
+          T: "X-Tenant-Id: 0c1f6a52-3b8e-4d7a-9f20-6e5b1c4d8a01"
         run: |
           printf '%%PDF-1.7 compose smoke test' > smoke.pdf
-          id=$(curl -sf -F "file=@smoke.pdf;type=application/pdf" "http://localhost:8080/api/v1/files?tenantId=ci&userId=u1" | jq -r .id)
+          id=$(curl -sf -H "$T" -F "file=@smoke.pdf;type=application/pdf" "http://localhost:8080/api/v1/files" | jq -r .id)
           echo "uploaded $id"
-          curl -sf "http://localhost:8080/api/v1/files?tenantId=ci" | jq -e --arg id "$id" 'map(.id) == [$id]'
-          curl -sf -o back.pdf "http://localhost:8080/api/v1/files/$id/content"
+          curl -sf -H "$T" "http://localhost:8080/api/v1/files" | jq -e --arg id "$id" 'map(.id) == [$id]'
+          curl -sf -H "$T" -o back.pdf "http://localhost:8080/api/v1/files/$id/content"
           cmp smoke.pdf back.pdf
+          # Another tenant can't see it.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "X-Tenant-Id: $(cat /proc/sys/kernel/random/uuid)" "http://localhost:8080/api/v1/files/$id/content")" = 404
           curl -sf http://localhost:8080/swagger/v1/swagger.json | jq -e '.paths | has("/api/v1/files/batch")'
 
       - name: Presigned link through the gateway
+        env:
+          T: "X-Tenant-Id: 0c1f6a52-3b8e-4d7a-9f20-6e5b1c4d8a01"
         run: |
-          id=$(curl -sf "http://localhost:8080/api/v1/files?tenantId=ci" | jq -r '.[0].id')
-          link=$(curl -sf "http://localhost:8080/api/v1/files/$id/presign" | jq -r .url)
+          id=$(curl -sf -H "$T" "http://localhost:8080/api/v1/files" | jq -r '.[0].id')
+          link=$(curl -sf -H "$T" "http://localhost:8080/api/v1/files/$id/presign" | jq -r .url)
           echo "link $link"
           curl -sf -o linked.pdf "$link"
           cmp smoke.pdf linked.pdf
           test "$(curl -s -o /dev/null -w '%{http_code}' "${link%%&sig=*}")" = 403
 
       - name: Direct upload through the gateway
+        env:
+          T: "X-Tenant-Id: 7d3e2b90-1a4c-4f6e-8b5d-0c9a7e1f3b42"
         run: |
           head -c 300000 /dev/urandom > body.bin
           { printf '%%PDF-1.7 '; cat body.bin; } > direct.pdf
           size=$(stat -c %s direct.pdf)
-          started=$(curl -sf -H "Content-Type: application/json" \
+          started=$(curl -sf -H "$T" -H "Content-Type: application/json" \
             -d "{\"fileName\":\"direct.pdf\",\"contentType\":\"application/pdf\",\"size\":$size}" \
-            "http://localhost:8080/api/v1/files/direct-uploads?tenantId=ci-direct")
+            "http://localhost:8080/api/v1/files/direct-uploads")
           echo "$started" | jq .
           url=$(echo "$started" | jq -r .url)
           upload=$(echo "$started" | jq -r .uploadId)
           curl -sf -X PUT -H "Content-Type: application/pdf" --data-binary @direct.pdf "$url"
-          id=$(curl -sf -X POST "http://localhost:8080/api/v1/files/direct-uploads/$upload/complete" | jq -r .id)
-          curl -sf -o direct-back.pdf "http://localhost:8080/api/v1/files/$id/content"
+          id=$(curl -sf -H "$T" -X POST "http://localhost:8080/api/v1/files/direct-uploads/$upload/complete" | jq -r .id)
+          curl -sf -H "$T" -o direct-back.pdf "http://localhost:8080/api/v1/files/$id/content"
           cmp direct.pdf direct-back.pdf
 
       - name: The API and the workers share the storage volume and Redis

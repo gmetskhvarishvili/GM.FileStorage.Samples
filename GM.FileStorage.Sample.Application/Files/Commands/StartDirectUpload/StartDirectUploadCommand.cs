@@ -1,4 +1,5 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.DirectUploadAggregate;
@@ -26,12 +27,6 @@ public class StartDirectUploadCommand : IRequest<DirectUploadDto>
 
     /// <summary>The file's exact size in bytes; the stored object must match it.</summary>
     public long Size { get; set; }
-
-    /// <summary>Tenant the file belongs to; defaults to <c>public</c>.</summary>
-    public string? TenantId { get; set; }
-
-    /// <summary>User the file belongs to; defaults to <c>anon</c>.</summary>
-    public string? UserId { get; set; }
 }
 
 public class StartDirectUploadCommandValidator : AbstractValidator<StartDirectUploadCommand>
@@ -41,8 +36,6 @@ public class StartDirectUploadCommandValidator : AbstractValidator<StartDirectUp
         RuleFor(x => x.FileName).NotEmpty().MaximumLength(DirectUpload.FileNameMaxLength);
         RuleFor(x => x.ContentType).NotEmpty().MaximumLength(DirectUpload.ContentTypeMaxLength);
         RuleFor(x => x.Size).GreaterThan(0);
-        RuleFor(x => x.TenantId).MaximumLength(StoredFileMetadata.ValueMaxLength);
-        RuleFor(x => x.UserId).MaximumLength(StoredFileMetadata.ValueMaxLength);
     }
 }
 
@@ -57,7 +50,8 @@ public class StartDirectUploadCommandHandler(
     IFileKeyStrategy keyStrategy,
     IOptions<FileStorageOptions> storageOptions,
     IOptions<DirectUploadOptions> options,
-    IOptions<QuotaOptions> quota)
+    IOptions<QuotaOptions> quota,
+    ICurrentActor actor)
     : IRequestHandler<StartDirectUploadCommand, DirectUploadDto>
 {
     public async Task<DirectUploadDto> Handle(StartDirectUploadCommand request, CancellationToken cancellationToken)
@@ -68,8 +62,8 @@ public class StartDirectUploadCommandHandler(
         if (!UploadRules.IsAllowed(storageOptions.Value, request.ContentType!))
             throw new BadRequestException($"Content type '{request.ContentType}' is not allowed.");
 
-        var tenantId = string.IsNullOrWhiteSpace(request.TenantId) ? "public" : request.TenantId;
-        var userId = string.IsNullOrWhiteSpace(request.UserId) ? "anon" : request.UserId;
+        var tenantId = actor.RequireTenant();
+        var userId = actor.UserOrAnonymous();
 
         // The declared size counts against the tenant's quota from now (the pending upload is part of its usage), and
         // completing it can't go over: the stored object must have exactly that size.

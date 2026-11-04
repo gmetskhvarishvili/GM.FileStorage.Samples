@@ -1,6 +1,8 @@
 using FluentValidation;
 using GM.API.Application.Models;
+using GM.EntityFramework.Domain.Common;
 using GM.EntityFramework.Domain.Specifications;
+using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
@@ -16,9 +18,6 @@ public class GetFilesListQuery : GetBaseListQuery, IRequest<PagedListDto<StoredF
 {
     public Guid? Id { get; set; }
 
-    /// <summary>Only files uploaded for this tenant (the <c>tenantId</c> metadata row).</summary>
-    public string? TenantId { get; set; }
-
     /// <summary>Only files uploaded for this user (the <c>userId</c> metadata row).</summary>
     public string? UserId { get; set; }
 
@@ -33,22 +32,24 @@ public class GetFilesListQuery : GetBaseListQuery, IRequest<PagedListDto<StoredF
 
 public class GetFilesListQueryValidator : AbstractValidator<GetFilesListQuery>;
 
-public class GetFilesListQueryHandler(IUnitOfWork unitOfWork)
+public class GetFilesListQueryHandler(IUnitOfWork unitOfWork, ICurrentActor actor)
     : IRequestHandler<GetFilesListQuery, PagedListDto<StoredFileDto>>
 {
     public async Task<PagedListDto<StoredFileDto>> Handle(
         GetFilesListQuery request, CancellationToken cancellationToken)
     {
+        // Always the caller's own files.
+        var tenantId = actor.RequireTenant();
         var dateRange = request.ToAuditDateRange();
         var paging = request.ToPagingOptions();
 
-        var countSpec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.Folder,
+        var countSpec = new StoredFileSpecification(request.Id, tenantId, request.UserId, request.Folder,
             request.ContentType, dateRange, PagingOptions.None, OrderingOptions.None, request.Visibility, request.IntegrityProblem);
         long? totalCount = paging.IncludeTotalCount
             ? await unitOfWork.StoredFileRepository.CountAsync(countSpec, cancellationToken)
             : null;
 
-        var spec = new StoredFileSpecification(request.Id, request.TenantId, request.UserId, request.Folder,
+        var spec = new StoredFileSpecification(request.Id, tenantId, request.UserId, request.Folder,
             request.ContentType, dateRange, paging, request.ToOrderingOptions(), request.Visibility, request.IntegrityProblem);
         var entities = await unitOfWork.StoredFileRepository.ListAsync(spec, cancellationToken);
 

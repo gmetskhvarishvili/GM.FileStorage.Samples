@@ -1,9 +1,12 @@
 using FluentValidation;
+using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
+using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,13 +29,15 @@ public class DeleteFileCommandValidator : AbstractValidator<DeleteFileCommand>
     }
 }
 
-public class DeleteFileCommandHandler(IUnitOfWork unitOfWork)
+public class DeleteFileCommandHandler(IUnitOfWork unitOfWork, ICurrentActor actor)
     : IRequestHandler<DeleteFileCommand>
 {
     public async Task Handle(DeleteFileCommand request, CancellationToken cancellationToken)
     {
+        var tenantId = actor.RequireTenant();
         var entity = await unitOfWork.StoredFileRepository
             .FirstOrDefaultAsync(x => x.Id == request.Id
+                                      && x.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId)
                                       && x.IsActive
                                       && !x.IsDeleted
                                       && !x.IsHidden,

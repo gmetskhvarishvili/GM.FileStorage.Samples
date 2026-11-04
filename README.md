@@ -10,7 +10,7 @@
 A layered **DDD + CQRS** file-storage sample built on the **GM.\*** ecosystem: streaming upload/download,
 keys organised by file type, delete and presigned links through the
 provider-agnostic `IFileStorageService` — plus a **PostgreSQL catalog** of every stored file and its
-metadata, so files can be listed by tenant or user, inspected by id, soft-deleted and restored. Targets
+metadata, so each tenant's files can be listed, inspected by id, soft-deleted and restored. Targets
 **.NET 10** and **PostgreSQL**.
 
 It assembles **[GM.FileStorage](https://www.nuget.org/packages/GM.FileStorage)** with its
@@ -115,13 +115,20 @@ flowchart LR
   `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
 - **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged
   and direct uploads in progress. An upload that would go past it gets a `400`, and its bytes are deleted.
-  `GET /api/v1/files/usage?tenantId=` shows the usage.
+  `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details, download
   and presign; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
-- **Searchable metadata.** The list filters by tenant/user with `Metadata.Any(...)` sub-queries served by the
+- **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
+  (required) and `X-User-Id` (optional, else `anon`), through `ICurrentActor`, as in every GM service. Uploads
+  are recorded under them, the list and usage only ever show the caller's tenant, and another tenant's file is a
+  `404` on every endpoint, as if it didn't exist. A request without `X-Tenant-Id` gets a `400`. The gateway passes
+  the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
+  sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
+  sets them from the token.
+- **Searchable metadata.** The list filters by user with `Metadata.Any(...)` sub-queries served by the
   `(name, value)` index, plus storage folder and content type, with GM.API paging (`X-Pagination` header).
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
@@ -220,23 +227,24 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files?tenantId=&userId=` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
-| `POST` | `/api/v1/files/batch?tenantId=&userId=` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?tenantId=&userId=&folder=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of files, storage key, metadata and last integrity check included |
-| `GET` | `/api/v1/files/usage?tenantId=` | A tenant's storage use: used bytes, quota, file count |
+| `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
+| `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
+| `GET` | `/api/v1/files?userId=&folder=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, storage key, metadata and last integrity check included |
+| `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
-| `POST` | `/api/v1/files/direct-uploads?tenantId=&userId=` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
+| `POST` | `/api/v1/files/direct-uploads` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
 | `POST` | `/api/v1/files/direct-uploads/{uploadId}/complete` | After sending the bytes: checks the stored object and records the file (`400` and deleted if it doesn't match) |
 | `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
 | `PUT` | `/files/{storageKey}?expires=&op=write&sig=` | Takes a local-disk direct upload's bytes (S3 and Azure take theirs themselves) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
-Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
+Every `/api/v1` call carries `X-Tenant-Id` (a GUID), and optionally `X-User-Id`; the links under `/files` are
+signed instead. Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
 30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
 
 ## Database setup
@@ -294,19 +302,21 @@ dotnet run --project GM.FileStorage.Sample.Worker       # storage cleanup, every
 dotnet run --project GM.FileStorage.Sample.Gateway.API  # https://localhost:7141, Swagger UI at /
 ```
 
-Then call the gateway:
+Then call the gateway, as a tenant (any GUID):
 
 ```bash
-curl -F "file=@passport.pdf" "https://localhost:7141/api/v1/files?tenantId=acme&userId=u1"
+T="X-Tenant-Id: 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71"
+
+curl -H "$T" -F "file=@passport.pdf" "https://localhost:7141/api/v1/files"
 # { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
 
-curl -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch?tenantId=acme&userId=u1"
+curl -H "$T" -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch"
 # [ { "fileName": "visa.pdf", "succeeded": true, "file": { "id": "…", … } }, { "fileName": "contract.docx", … } ]
 
-curl "https://localhost:7141/api/v1/files?tenantId=acme"
-curl -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
-curl -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
-curl -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
+curl -H "$T" "https://localhost:7141/api/v1/files"
+curl -H "$T" -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
+curl -H "$T" -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
+curl -H "$T" -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
 ```
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
@@ -344,14 +354,14 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
-against a throwaway storage root and drive it over HTTP: upload → list by tenant/user/storage folder → details →
+against a throwaway storage root and drive it over HTTP: upload → list by user/storage folder → details →
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
 the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
 uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
-per-client file count refusing a batch whole, retries with an `Idempotency-Key` storing and counting a file once, and
+per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
 `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
