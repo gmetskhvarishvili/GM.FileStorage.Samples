@@ -32,9 +32,6 @@ public static class DependencyInjection
         // encrypted with its own AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
         services.AddGMFileStorageEncryption(configuration);
 
-        // Large files written straight into storage through presigned links (DirectUploads in appsettings.json).
-        services.Configure<DirectUploadOptions>(configuration.GetSection("DirectUploads"));
-
         // Bytes each tenant may store (Quotas:BytesPerTenant).
         services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
 

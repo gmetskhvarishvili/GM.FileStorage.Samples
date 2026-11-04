@@ -11,7 +11,7 @@ namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
 /// How many files a client may upload: <c>RateLimiting:Policies:uploaded-files</c> (30 a minute), counted per file
-/// rather than per request, since one batch holds up to 20. Single, batch and direct uploads share it. The count lives in
+/// rather than per request, since one batch holds up to 20. Single and batch uploads share it. The count lives in
 /// GM.RateLimiting's store, so with Redis it holds across every API instance. Over the limit,
 /// <see cref="RateLimitExceededException"/> is thrown (answered with 429 and Retry-After); a batch it stops is refused
 /// whole.

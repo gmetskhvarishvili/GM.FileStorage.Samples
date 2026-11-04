@@ -89,24 +89,6 @@ jobs:
           cmp smoke.pdf linked.pdf
           test "$(curl -s -o /dev/null -w '%{http_code}' "${link%%&sig=*}")" = 403
 
-      - name: Direct upload through the gateway
-        env:
-          T: "X-Tenant-Id: 7d3e2b90-1a4c-4f6e-8b5d-0c9a7e1f3b42"
-        run: |
-          head -c 300000 /dev/urandom > body.bin
-          { printf '%%PDF-1.7 '; cat body.bin; } > direct.pdf
-          size=$(stat -c %s direct.pdf)
-          started=$(curl -sf -H "$T" -H "Content-Type: application/json" \
-            -d "{\"fileName\":\"direct.pdf\",\"contentType\":\"application/pdf\",\"size\":$size}" \
-            "http://localhost:8080/api/v1/files/direct-uploads")
-          echo "$started" | jq .
-          url=$(echo "$started" | jq -r .url)
-          upload=$(echo "$started" | jq -r .uploadId)
-          curl -sf -X PUT -H "Content-Type: application/pdf" --data-binary @direct.pdf "$url"
-          id=$(curl -sf -H "$T" -X POST "http://localhost:8080/api/v1/files/direct-uploads/$upload/complete" | jq -r .id)
-          curl -sf -H "$T" -o direct-back.pdf "http://localhost:8080/api/v1/files/$id/content"
-          cmp direct.pdf direct-back.pdf
-
       - name: The API and the workers share the storage volume and Redis
         run: |
           docker compose exec -T api find /data/file-storage -name '*.pdf' | grep -q .

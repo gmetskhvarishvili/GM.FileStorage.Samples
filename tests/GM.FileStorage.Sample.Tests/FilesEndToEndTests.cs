@@ -234,8 +234,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = Client(_factory);
         var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 ours");
         var ours = await UploadAsync(client, bytes, "ours.pdf");
-        var direct = await StartDirectUploadAsync(client, "direct.pdf", "application/pdf", bytes.Length);
-        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, direct, bytes)).StatusCode);
 
         // Another tenant sees nothing of ours: not in its list or usage, and every id is a 404, as if unknown.
         using var other = _factory.CreateClient();
@@ -247,7 +245,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/content")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/presign")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.DeleteAsync($"/api/v1/files/{ours.Id}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await other.PostAsync($"/api/v1/files/direct-uploads/{direct.UploadId}/complete", null)).StatusCode);
 
         // Nor can it restore what we deleted.
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{ours.Id}")).StatusCode);
@@ -268,10 +265,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Empty(await ListAsync(nobody, $"id={ours.Id}"));
         Assert.Equal(HttpStatusCode.NotFound, (await nobody.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
 
-        // Ours is untouched, and the direct upload still completes for us.
+        // Ours is untouched.
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{ours.Id}/content"));
-        await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{direct.UploadId}/complete", null));
-        Assert.Equal(2, (await ListAsync(client, "")).Count);
+        Assert.Single(await ListAsync(client, ""));
     }
 
     [Fact]
@@ -367,101 +363,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(link)).StatusCode);
     }
 
-    // Starts a direct upload; returns the response, or throws if it wasn't 200.
-    private static async Task<DirectUploadResponse> StartDirectUploadAsync(HttpClient client, string fileName, string contentType, long size)
-    {
-        var response = await client.PostAsJsonAsync($"/api/v1/files/direct-uploads",
-            new { fileName, contentType, size });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var started = await response.Content.ReadFromJsonAsync<DirectUploadResponse>();
-        Assert.NotNull(started);
-        return started;
-    }
-
-    // Sends the bytes to the link as told (on local disk the link is this API's /files, so the test client can).
-    private static async Task<HttpResponseMessage> PutToLinkAsync(HttpClient client, DirectUploadResponse started, byte[] bytes, string? pathAndQuery = null)
-    {
-        using var request = new HttpRequestMessage(new HttpMethod(started.Method), pathAndQuery ?? started.Url.PathAndQuery)
-        {
-            Content = new ByteArrayContent(bytes),
-        };
-        foreach (var (name, value) in started.Headers)
-        {
-            if (!request.Headers.TryAddWithoutValidation(name, value))
-                request.Content.Headers.TryAddWithoutValidation(name, value);
-        }
-        return await client.SendAsync(request);
-    }
-
-    [Fact]
-    public async Task Direct_uploads_go_straight_to_storage_and_are_recorded_on_completion()
-    {
-        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
-
-        using var client = Client(_factory);
-        var bytes = new byte[200_000];
-        new Random(7).NextBytes(bytes);
-        "%PDF-1.7 "u8.CopyTo(bytes);
-
-        var started = await StartDirectUploadAsync(client, "big.pdf", "application/pdf", bytes.Length);
-        Assert.Equal("PUT", started.Method);
-        Assert.Contains("op=write", started.Url.Query);
-        Assert.True(started.ExpiresAtUtc > DateTime.UtcNow);
-
-        // Nothing is recorded until the upload is completed.
-        Assert.Empty(await ListAsync(client, ""));
-        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, bytes)).StatusCode);
-        Assert.Empty(await ListAsync(client, ""));
-
-        var completed = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
-        Assert.Equal((started.UploadId, "big.pdf", (long)bytes.Length), (completed.Id, completed.FileName, completed.Size));
-        var hex = completed.Id.ToString("N");
-        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", await StoragePathAsync(completed.Id));
-        Assert.Null(completed.Checksum); // the API never read the bytes
-        var listed = Assert.Single(await ListAsync(client, $"userId={_userId}"));
-        Assert.Equal(completed.Id, listed.Id);
-        Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{completed.Id}/content"));
-
-        // Done: the upload can't be completed twice, and nothing is left queued for cleanup.
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null)).StatusCode);
-        Assert.Empty(await CleanupEntriesAsync());
-    }
-
-    [Fact]
-    public async Task Direct_uploads_are_checked_before_and_after_the_bytes_move()
-    {
-        if (!_infraReady) return;
-
-        using var client = Client(_factory);
-        var url = $"/api/v1/files/direct-uploads";
-
-        // Refused up front: a type that isn't allowed, a size over the limit (5 GB).
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new { fileName = "a.html", contentType = "text/html", size = 10 })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(url, new { fileName = "a.pdf", contentType = "application/pdf", size = 6L * 1024 * 1024 * 1024 })).StatusCode);
-
-        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 direct");
-        var started = await StartDirectUploadAsync(client, "a.pdf", "application/pdf", bytes.Length);
-        var complete = $"/api/v1/files/direct-uploads/{started.UploadId}/complete";
-
-        // Completing before anything was sent is refused, but the upload stays open.
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync(complete, null)).StatusCode);
-
-        // An altered link can't be written.
-        var forged = started.Url.PathAndQuery.Replace("op=write", "op=read", StringComparison.Ordinal);
-        Assert.Equal(HttpStatusCode.Forbidden, (await PutToLinkAsync(client, started, bytes, forged)).StatusCode);
-
-        // Bytes that don't match the declared size: refused on completion, and deleted.
-        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, [.. bytes, .. "extra"u8])).StatusCode);
-        Assert.Single(StoredObjects());
-        var mismatch = await client.PostAsync(complete, null);
-        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
-        Assert.Contains("declared", await mismatch.Content.ReadAsStringAsync());
-        Assert.Empty(StoredObjects());
-        Assert.Empty(await CleanupEntriesAsync());
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(complete, null)).StatusCode);
-        Assert.Empty(await ListAsync(client, ""));
-    }
-
     [Fact]
     public async Task Uploaded_files_are_counted_per_client_not_per_request()
     {
@@ -486,11 +387,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(["a.pdf", "b.pdf"], (await ListAsync(client, "")).Select(f => f.FileName).Order());
         Assert.Equal(2, StoredObjects().Length);
 
-        // The third permit went to c.pdf before d.pdf was refused, so single and direct uploads are out too.
+        // The third permit went to c.pdf before d.pdf was refused, so a single upload is out too.
         Assert.Equal(HttpStatusCode.TooManyRequests,
             (await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Encoding.UTF8.GetBytes("%PDF-1.7 e"), "e.pdf", "application/pdf")).StatusCode);
-        Assert.Equal(HttpStatusCode.TooManyRequests,
-            (await client.PostAsJsonAsync($"/api/v1/files/direct-uploads", new { fileName = "f.pdf", contentType = "application/pdf", size = 10 })).StatusCode);
     }
 
     [Fact]
@@ -498,11 +397,11 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     {
         if (!_infraReady) return;
 
-        // A limit of 4 files a minute shows that a replayed retry doesn't count as another file.
+        // A limit of 3 files a minute shows that a replayed retry doesn't count as another file.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{category}}/{{shard}}/{{id}}{{ext}}")
-            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "4");
+            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
         using var client = Client(factory);
         var single = $"/api/v1/files";
         async Task<HttpResponseMessage> WithKey(string key, Func<HttpClient, Task<HttpResponseMessage>> send)
@@ -534,18 +433,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var second = await ExpectOkAsync(WithKey(fixedKey, c => Pdf(c, "b.pdf")));
         Assert.NotEqual(first.Id, second.Id);
 
-        // Completing a direct upload again replays the file instead of 404.
-        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 direct");
-        var started = await StartDirectUploadAsync(client, "c.pdf", "application/pdf", bytes.Length);
-        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, bytes)).StatusCode);
-        var completeKey = Guid.NewGuid().ToString();
-        var complete = $"/api/v1/files/direct-uploads/{started.UploadId}/complete";
-        var completed = await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)));
-        Assert.Equal(completed.Id, (await ExpectOkAsync(WithKey(completeKey, c => c.PostAsync(complete, null)))).Id);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(complete, null)).StatusCode);
-
-        // Three files stored and one refused: four permits used, however many retries.
-        Assert.Equal(3, (await ListAsync(client, "")).Count);
+        // Two files stored and one refused: three permits used, however many retries.
+        Assert.Equal(2, (await ListAsync(client, "")).Count);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await Pdf(client, "d.pdf")).StatusCode);
     }
 
@@ -560,12 +449,14 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var grown = await UploadAsync(client, Pdf("grown"), "grown.pdf");
         var lost = await UploadAsync(client, Pdf("lost"), "lost.pdf");
 
-        // A direct upload is recorded without a checksum: the API never read its bytes.
-        var directBytes = Pdf("direct upload");
-        var started = await StartDirectUploadAsync(client, "direct.pdf", "application/pdf", directBytes.Length);
-        Assert.Equal(HttpStatusCode.OK, (await PutToLinkAsync(client, started, directBytes)).StatusCode);
-        var direct = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
-        Assert.Null(direct.Checksum);
+        // A file recorded without a checksum (as files were before checksums were kept).
+        var legacyBytes = Pdf("legacy");
+        var legacy = await UploadAsync(client, legacyBytes, "legacy.pdf");
+        using (var scope = _factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Set<StoredFile>()
+                .Where(x => x.Id == legacy.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Checksum, (string?)null));
+        }
 
         // Damage three files on disk: same size but different bytes, extra bytes, gone.
         var alteredPath = Path.Combine(_root, await StoragePathAsync(altered.Id));
@@ -577,10 +468,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         async Task<DetailsResponse> Details(Guid id) =>
             (await client.GetFromJsonAsync<DetailsResponse>($"/api/v1/files/{id}"))!;
-        var directDetails = await Details(direct.Id);
-        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(directBytes)), directDetails.Checksum);
-        Assert.Null(directDetails.IntegrityProblem);
-        Assert.NotNull(directDetails.VerifiedAtUtc);
+        var legacyDetails = await Details(legacy.Id);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(legacyBytes)), legacyDetails.Checksum);
+        Assert.Null(legacyDetails.IntegrityProblem);
+        Assert.NotNull(legacyDetails.VerifiedAtUtc);
         Assert.Contains("checksum", (await Details(altered.Id)).IntegrityProblem);
         Assert.Contains("bytes, not the", (await Details(grown.Id)).IntegrityProblem);
         Assert.Contains("missing", (await Details(lost.Id)).IntegrityProblem);
@@ -588,7 +479,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // The list finds them.
         Assert.Equal(new[] { altered.Id, grown.Id, lost.Id }.Order(),
             (await ListAsync(client, $"integrityProblem=true")).Select(f => f.Id).Order());
-        Assert.Equal([direct.Id], (await ListAsync(client, $"integrityProblem=false")).Select(f => f.Id));
+        Assert.Equal([legacy.Id], (await ListAsync(client, $"integrityProblem=false")).Select(f => f.Id));
     }
 
     [Fact]
@@ -655,16 +546,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Empty(await CleanupEntriesAsync());
         Assert.Equal((20L, 40L, 1), (await Usage()) is var u ? (u.UsedBytes, u.QuotaBytes!.Value, u.FileCount) : default);
 
-        // A direct upload's declared size counts from the moment it starts.
-        var directUrl = $"/api/v1/files/direct-uploads";
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 25 })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync(directUrl, new { fileName = "d.pdf", contentType = "application/pdf", size = 15 })).StatusCode);
-        Assert.Equal(35, (await Usage()).UsedBytes);
-
         // A deleted file still takes space until retention purges it.
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{firstId}")).StatusCode);
-        Assert.Equal(35, (await Usage()).UsedBytes);
-        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(10)).StatusCode);
+        Assert.Equal(20, (await Usage()).UsedBytes);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(25)).StatusCode);
     }
 
     [Fact]
@@ -947,7 +832,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     private sealed record PresignedResponse(Uri Url, DateTime ExpiresAtUtc);
 
-    private sealed record DirectUploadResponse(Guid UploadId, Uri Url, string Method, Dictionary<string, string> Headers, DateTime ExpiresAtUtc);
 
     private sealed record UploadResultResponse(string FileName, bool Succeeded, UploadResponse? File, string? Error);
 

@@ -90,16 +90,12 @@ flowchart LR
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
 - **Files counted per client, not requests.** Every uploaded file takes a permit from
-  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single, batch and direct uploads alike: a batch of
+  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single and batch uploads alike: a batch of
   20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
   limits requests on top.
-- **Direct uploads for large files.** `POST /files/direct-uploads` returns a presigned write link (up to 5 GB, an hour
-  to use it); the client sends the bytes straight to S3 or Azure, then completes the upload. The API checks the stored
-  object (size, and its first bytes against the declared type) before recording it, and deletes what doesn't match.
-  On local disk the link is signed and the API's `/files` takes the PUT. Not available with encryption at rest.
 - **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
   runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
-  nothing and counts no file. That covers a single upload, a batch, starting a direct upload and completing one. Only
+  nothing and counts no file. That covers a single upload and a batch. Only
   successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
   while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
   the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the
@@ -110,11 +106,11 @@ flowchart LR
 - **Integrity checks.** Every 5 minutes the worker reads a batch of stored files back (decrypted when encryption is
   on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
   as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
-  `integrityProblem=true`. Direct uploads, recorded without a checksum, get one here.
+  `integrityProblem=true`. A file recorded without a checksum gets one here.
 - **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
   `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
-- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged
-  and direct uploads in progress. An upload that would go past it gets a `400`, and its bytes are deleted.
+- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged.
+  An upload that would go past it gets a `400`, and its bytes are deleted.
   `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
@@ -236,10 +232,7 @@ because a direct link would serve ciphertext.
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
-| `POST` | `/api/v1/files/direct-uploads` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
-| `POST` | `/api/v1/files/direct-uploads/{uploadId}/complete` | After sending the bytes: checks the stored object and records the file (`400` and deleted if it doesn't match) |
 | `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
-| `PUT` | `/files/{storageKey}?expires=&op=write&sig=` | Takes a local-disk direct upload's bytes (S3 and Azure take theirs themselves) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
@@ -358,8 +351,7 @@ against a throwaway storage root and drive it over HTTP: upload (stored under it
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
-the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
-uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
+the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
 `PUT` on a file's content being refused (405). They need PostgreSQL and

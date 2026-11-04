@@ -25,7 +25,7 @@ public class IntegrityOptions
 /// <summary>
 /// Reads stored files back and checks them against the catalog: the bytes exist, have the recorded size, and hash to
 /// the recorded checksum (decrypted first when encryption at rest is on, as the checksum is the plaintext's). A file
-/// stored without a checksum (a direct upload: its bytes never passed through the API) gets one recorded. What's
+/// stored without a checksum (recorded before checksums were kept) gets one recorded. What's
 /// found is kept on the file (<see cref="StoredFile.VerifiedAtUtc"/>, <see cref="StoredFile.IntegrityProblem"/>),
 /// so problems show in the files list and details. Deleted files are checked too: their bytes are kept for a restore.
 /// </summary>

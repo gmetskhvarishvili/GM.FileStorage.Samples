@@ -17,7 +17,7 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [Direct upload](#direct-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -190,46 +190,6 @@ sequenceDiagram
 Every file goes through the full single-file sequence above, in its own transaction, so a failure leaves the files
 before and after it untouched. A cancelled request (the client disconnects) stops the batch; the files already
 stored stay.
-
-## Direct upload — sequence
-
-`POST /api/v1/files/direct-uploads`, the client's PUT, then `POST …/direct-uploads/{uploadId}/complete`
-
-```mermaid
----
-title: Direct upload — sequence
----
-sequenceDiagram
-    autonumber
-    actor C as Client
-    participant API
-    participant DB
-    participant S as Storage
-
-    C->>API: start (fileName, contentType, size)
-    API->>API: upload permit, type allowed, size ≤ 5 GB
-    API->>API: new upload id, storage key from KeyTemplate on it
-    API->>S: GetPresignedUrlAsync(key, Write, 1 hour)
-    API->>DB: one transaction: direct_uploads row,<br/>storage_cleanups (key, due when the link expires + 15 min)
-    API-->>C: uploadId, url, PUT, headers, expiresAtUtc
-
-    C->>S: PUT url with the bytes (on local disk, the API's /files takes it)
-
-    C->>API: complete (uploadId)
-    API->>DB: the pending upload
-    API->>S: exists? then the first bytes and real size (a ranged read)
-    alt wrong size or type
-        API->>DB: forget the upload
-        API->>S: delete the bytes (left queued if this fails)
-        API-->>C: 400
-    else matches
-        API->>DB: one transaction: stored_files + metadata,<br/>remove the upload and its cleanup entry
-        API-->>C: 200 { id (the upload's), size }
-    end
-```
-
-An upload that's never completed is forgotten by the worker once its link expires, and its bytes deleted with the
-cleanup entry queued at the start.
 
 ## List — sequence
 
@@ -524,7 +484,7 @@ sequenceDiagram
                 W->>DB: problem = altered or truncated
             else wrong size
                 W->>DB: problem = size differs from the record
-            else no checksum recorded yet (a direct upload)
+            else no checksum recorded yet
                 W->>DB: record the checksum, no problem
             else checksum differs
                 W->>DB: problem = checksum mismatch

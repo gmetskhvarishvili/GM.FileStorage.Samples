@@ -63,7 +63,7 @@ services:
     environment:
       <<: *app-environment
       ASPNETCORE_ENVIRONMENT: Development
-      # Presigned links on local disk (downloads and direct uploads) point at the gateway, signed with this demo key
+      # Presigned links on local disk point at the gateway, signed with this demo key
       # (the one in appsecrets.example.json).
       FileStorage__Local__PublicBaseUrl: http://localhost:8080/files
       FileStorage__Local__SigningKey: "qPNCcLDn8ZXoh6z8LE9rPGYNWRMaHDSWDevspFMUGewh"
