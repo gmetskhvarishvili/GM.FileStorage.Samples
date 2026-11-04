@@ -26,12 +26,10 @@ public class MappingRegister : IRegister
                 ? src.Value.ToString(AuditableDto.DateTimeFormat, CultureInfo.InvariantCulture)
                 : null);
 
-        // The metadata rows flatten to the name/value map the file was uploaded with (deleted rows left out).
+        // The uploader is the audit column CreatedBy (their X-User-Id).
         config.NewConfig<StoredFile, StoredFileDto>()
-            .Map(dest => dest.Metadata, src => src.Metadata
-                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value));
+            .Map(dest => dest.UploadedBy, src => src.CreatedBy);
         config.NewConfig<StoredFile, StoredFileDetailsDto>()
-            .Map(dest => dest.Metadata, src => src.Metadata
-                .Where(x => !x.IsDeleted).ToDictionary(x => x.Name, x => x.Value));
+            .Map(dest => dest.UploadedBy, src => src.CreatedBy);
     }
 }

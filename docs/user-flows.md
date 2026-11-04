@@ -5,7 +5,7 @@ What a caller can do with a file, and every outcome they can get back. A caller 
 it, so another tenant's id (or the shared space's) answers `404`, like an unknown one. Each flow starts at the gateway
 (`https://localhost:7141`); the [sequence diagrams](sequence-diagrams.md) show what happens inside.
 
-**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [Direct upload](#direct-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
+**Diagrams in this doc:** [File lifecycle](#file-lifecycle--state-diagram) · [Gateway checks](#gateway-checks--user-flow) · [Upload](#upload--user-flow) · [Batch upload](#batch-upload--user-flow) · [List](#list--user-flow) · [Details](#details--user-flow) · [Download](#download--user-flow) · [Delete](#delete--user-flow) · [Restore](#restore--user-flow) · [Presign](#presign--user-flow) · [Typical session](#typical-session--user-journey)  
 All diagrams: [index](README.md)
 
 ## File lifecycle — state diagram
@@ -87,12 +87,11 @@ flowchart TD
 ```
 
 The file belongs to the caller's tenant (`X-Tenant-Id`, else the shared `public` space), and only that tenant ever
-sees it. Without `X-User-Id` it is recorded as uploaded by `anon`.
+sees it. Without `X-User-Id` it has no uploader.
 
 To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
 a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
-first is still running gets `409`, and a retry after a refusal runs again. The same holds for batch uploads and for
-starting and completing direct uploads.
+first is still running gets `409`, and a retry after a refusal runs again. The same holds for batch uploads.
 
 The file streams from the request straight into storage; nothing is buffered first. So a file over the size limit
 (50 MB) is refused as soon as it passes the limit, not after the whole upload. It also means a second file is only
@@ -127,34 +126,6 @@ file doesn't stop the others, so the response is `200` even when some (or all) f
 each result. A 21st file is only seen after 20 are stored; they're then discarded and the batch is refused, so a
 batch is all-or-nothing about its size. The whole request is still capped at 60 MB.
 
-## Direct upload — user flow
-
-```mermaid
----
-title: Direct upload — user flow
----
-flowchart TD
-    start([POST /api/v1/files/direct-uploads<br/>fileName, contentType, size, X-Tenant-Id?]) --> quota{Upload permit left?<br/>30 files a minute}
-    quota -- no --> q429[429 + Retry-After]
-    quota -- yes --> rules{Type allowed, size within 5 GB,<br/>links possible?}
-    rules -- no --> r400[400 with the reason<br/>e.g. encryption at rest is on]
-    rules -- yes --> link[200 uploadId, url, method, headers,<br/>expiresAtUtc]
-    link --> put([PUT the bytes to url with the headers<br/>S3 / Azure directly; local disk: the API's /files])
-    put --> done([POST …/direct-uploads/uploadId/complete])
-    done --> found{Your tenant's upload, pending<br/>and not expired?}
-    found -- "no: unknown or done" --> n404[404]
-    found -- expired --> e400[400 start again]
-    found -- yes --> there{Bytes in storage?}
-    there -- no --> t400[400 nothing uploaded yet<br/>upload stays open]
-    there -- yes --> match{Declared size, and<br/>declared type by its bytes?}
-    match -- no --> m400[400, bytes deleted<br/>start again]
-    match -- yes --> ok[200 id = uploadId, size<br/>checksum: null]
-```
-
-For files too large to send through the API. The bytes never pass through it (on S3 and Azure), so the file has
-no checksum. If the client never completes, the bytes are deleted once the link has expired. Not available with
-encryption at rest: the client can't encrypt for the API.
-
 ## List — user flow
 
 ```mermaid
@@ -183,7 +154,7 @@ flowchart TD
     guid -- no --> n404[404 no such route]
     guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
-    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>metadata, audit dates]
+    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>tenantId, uploadedBy, audit dates]
 ```
 
 ## Download — user flow
@@ -232,7 +203,7 @@ flowchart TD
     deleted -- yes --> bytes{Its bytes still in storage?}
     bytes -- no --> b404[404]
     bytes -- yes --> ok[204 No Content]
-    ok --> after([Back as it was:<br/>same content, same metadata])
+    ok --> after([Back as it was:<br/>same content, same record])
 ```
 
 ## Presign — user flow

@@ -8,7 +8,7 @@ public class TenantUsageModel
 {
     [Display(ResourceType = typeof(StringResource), Name = "TenantId")]
     public string? TenantId { get; set; }
-    /// <summary>Bytes stored: files (deleted ones until purged) plus direct uploads in progress.</summary>
+    /// <summary>Bytes stored: files, deleted ones until purged.</summary>
     public long UsedBytes { get; set; }
     /// <summary>The tenant's quota in bytes; null when unlimited.</summary>
     public long? QuotaBytes { get; set; }

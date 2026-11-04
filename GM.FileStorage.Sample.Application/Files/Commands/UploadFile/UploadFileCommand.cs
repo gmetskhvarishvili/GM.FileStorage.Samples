@@ -60,12 +60,10 @@ public class UploadFileCommandHandler(
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // The caller's tenant and user travel as upload metadata, kept by the catalog as searchable rows.
-        var metadata = new Dictionary<string, string>
-        {
-            [StoredFileMetadataNames.TenantId] = actor.TenantOrShared(),
-            [StoredFileMetadataNames.UserId] = actor.UserOrAnonymous(),
-        };
+        // The caller's tenant: recorded on the file, and offered to the key template ({meta:tenantId}) and the stored
+        // object's metadata. The uploader is recorded by the audit columns (CreatedBy).
+        var tenantId = actor.TenantOrShared();
+        var metadata = new Dictionary<string, string> { [StoredFileMetadataNames.TenantId] = tenantId };
 
         // The file's id, and where its bytes go: a path from FileStorage:KeyTemplate built on that id, so the stored
         // object is named after the file. It's needed before the upload (it's queued first), so it's built from the
@@ -76,7 +74,6 @@ public class UploadFileCommandHandler(
 
         // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
         // upload has streamed, so it's checked again then).
-        var tenantId = metadata[StoredFileMetadataNames.TenantId];
         await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, 0, cancellationToken);
 
         // 1. Queue the new storage key before any bytes exist, so a crash after the upload can't strand them.
@@ -128,14 +125,8 @@ public class UploadFileCommandHandler(
         {
             entity = StoredFile.Create(id, storageKey, stored.FileName, stored.ContentType, stored.Size,
                 stored.Checksum, stored.Visibility == FileVisibility.Public,
-                stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow);
+                stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow, tenantId);
             await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
-
-            foreach (var (name, value) in metadata)
-            {
-                await unitOfWork.StoredFileMetadataRepository.AddAsync(
-                    StoredFileMetadata.Create(entity.Id, name, value), cancellationToken);
-            }
 
             // The bytes are referenced now, so they're no longer the pending upload's to clean up. If the job has
             // already claimed the entry (an upload slower than the grace period), this save fails instead.

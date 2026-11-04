@@ -1,6 +1,5 @@
 using GM.EntityFramework.Domain.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.SeedWork;
 using System.Linq;
 
 namespace GM.FileStorage.Sample.Application.Common;
@@ -18,16 +17,10 @@ public static class Tenancy
     /// </summary>
     public const string SharedTenant = "public";
 
-    /// <summary>The user recorded when the caller names none (a service calling for its tenant, say).</summary>
-    public const string AnonymousUser = "anon";
-
-    /// <summary>The caller's tenant, as stored in the <c>tenantId</c> metadata row.</summary>
+    /// <summary>The caller's tenant, as stored in <see cref="StoredFile.TenantId"/>.</summary>
     public static string TenantOrShared(this ICurrentActor actor) => actor.TenantId?.ToString() ?? SharedTenant;
-
-    /// <summary>The caller's user, as stored in the <c>userId</c> metadata row.</summary>
-    public static string UserOrAnonymous(this ICurrentActor actor) => actor.UserId?.ToString() ?? AnonymousUser;
 
     /// <summary>Files uploaded for <paramref name="tenantId"/>, deleted ones included.</summary>
     public static IQueryable<StoredFile> OwnedBy(this IQueryable<StoredFile> files, string tenantId) =>
-        files.Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId));
+        files.Where(f => f.TenantId == tenantId);
 }

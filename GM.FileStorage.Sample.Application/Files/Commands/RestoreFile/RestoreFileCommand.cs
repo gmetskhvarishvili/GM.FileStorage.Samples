@@ -37,7 +37,7 @@ public class RestoreFileCommandHandler(IUnitOfWork unitOfWork, IFileStorageServi
         var tenantId = actor.TenantOrShared();
         var entity = await unitOfWork.StoredFileRepository
             .FirstOrDefaultAsync(x => x.Id == request.Id
-                                      && x.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId)
+                                      && x.TenantId == tenantId
                                       && x.IsDeleted,
                 true,
                 null,

@@ -118,64 +118,6 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                     b.ToTable("domain_events", "domain_events");
                 });
 
-            modelBuilder.Entity("GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.DirectUploadAggregate.DirectUpload", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("content_type");
-
-                    b.Property<DateTime>("ExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("expires_at_utc");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("file_name");
-
-                    b.Property<long>("Size")
-                        .HasColumnType("bigint")
-                        .HasColumnName("size");
-
-                    b.Property<string>("StorageKey")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("storage_key");
-
-                    b.Property<string>("TenantId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_direct_uploads");
-
-                    b.HasIndex("ExpiresAtUtc")
-                        .HasDatabaseName("ix_direct_uploads_expires_at_utc");
-
-                    b.HasIndex("StorageKey")
-                        .IsUnique()
-                        .HasDatabaseName("ix_direct_uploads_storage_key");
-
-                    b.ToTable("direct_uploads", "file_storage");
-                });
-
             modelBuilder.Entity("GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.StorageCleanup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -277,6 +219,12 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("storage_key");
 
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -302,6 +250,9 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                     b.HasIndex("StorageKey")
                         .IsUnique()
                         .HasDatabaseName("ix_stored_files_storage_key");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_stored_files_tenant_id");
 
                     b.HasIndex("UploadedAtUtc")
                         .HasDatabaseName("ix_stored_files_uploaded_at_utc");

@@ -7,7 +7,7 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 
 public class StoredFileSpecification : BaseSpecification<StoredFile>
 {
-    public StoredFileSpecification(Guid? id, string? tenantId, string? userId, string? contentType,
+    public StoredFileSpecification(Guid? id, string? tenantId, Guid? userId, string? contentType,
         AuditDateRange dateRange, PagingOptions paging, OrderingOptions ordering,
         VisibilityScope visibility = VisibilityScope.VisibleOnly, bool? integrityProblem = null)
     {
@@ -16,14 +16,12 @@ public class StoredFileSpecification : BaseSpecification<StoredFile>
         if (id.HasValue && id.Value != Guid.Empty)
             AddCriteria(f => f.Id == id);
 
-        // Tenant and user are metadata rows, so these are EXISTS sub-queries served by the (name, value) index.
+        // The tenant is a column (indexed); the uploader is the audit column CreatedBy.
         if (!string.IsNullOrWhiteSpace(tenantId))
-            AddCriteria(f => f.Metadata.Any(m =>
-                m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId && !m.IsDeleted));
+            AddCriteria(f => f.TenantId == tenantId);
 
-        if (!string.IsNullOrWhiteSpace(userId))
-            AddCriteria(f => f.Metadata.Any(m =>
-                m.Name == StoredFileMetadataNames.UserId && m.Value == userId && !m.IsDeleted));
+        if (userId.HasValue)
+            AddCriteria(f => f.CreatedBy == userId);
 
         if (!string.IsNullOrWhiteSpace(contentType))
             AddCriteria(f => f.ContentType == contentType);
@@ -35,7 +33,6 @@ public class StoredFileSpecification : BaseSpecification<StoredFile>
             AddCriteria(f => f.IntegrityProblem == null);
 
         // The list returns each file's metadata alongside it.
-        AddInclude(f => f.Metadata);
 
         ApplyListQuery(dateRange, paging, ordering);
     }

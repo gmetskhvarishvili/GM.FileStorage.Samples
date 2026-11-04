@@ -65,7 +65,7 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 // Keys don't carry the tenant: this test's rows are the ones tagged with its unique tenant id.
                 var ids = await context.Set<StoredFile>()
-                    .Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == _tenantId))
+                    .Where(f => f.TenantId == _tenantId)
                     .Select(f => f.Id).ToListAsync();
                 await context.Set<StoredFileMetadata>().Where(x => ids.Contains(x.StoredFileId)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => ids.Contains(x.Id)).ExecuteDeleteAsync();

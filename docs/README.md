@@ -12,9 +12,6 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | Gateway | every request | [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) |
 | Upload | `POST /api/v1/files` | [Upload — user flow](user-flows.md#upload--user-flow) | [Upload — sequence](sequence-diagrams.md#upload--sequence) |
 | Batch upload | `POST /api/v1/files/batch` | [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | [Batch upload — sequence](sequence-diagrams.md#batch-upload--sequence) |
-| [Direct upload — sequence](sequence-diagrams.md#direct-upload--sequence) | Presigned write link, the client PUT, checks on completion |
-| [Direct upload — user flow](user-flows.md#direct-upload--user-flow) | Large files straight to storage: start, PUT, complete; what is checked |
-| Direct upload | `POST /api/v1/files/direct-uploads` + `…/complete` | [Direct upload — user flow](user-flows.md#direct-upload--user-flow) | [Direct upload — sequence](sequence-diagrams.md#direct-upload--sequence) |
 | List | `GET /api/v1/files` | [List — user flow](user-flows.md#list--user-flow) | [List — sequence](sequence-diagrams.md#list--sequence) |
 | Details | `GET /api/v1/files/{id}` | [Details — user flow](user-flows.md#details--user-flow) | [Details — sequence](sequence-diagrams.md#details--sequence) |
 | Download | `GET /api/v1/files/{id}/content` | [Download — user flow](user-flows.md#download--user-flow) | [Download — sequence](sequence-diagrams.md#download--sequence) |
@@ -30,7 +27,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | --- | --- |
 | [System architecture — flowchart](architecture.md#system-architecture--flowchart) | Gateway, API and worker, and what each talks to |
 | [Layers — dependency graph](architecture.md#layers--dependency-graph) | Which layer each host uses |
-| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files`, `stored_file_metadata`, `storage_cleanups` |
+| [Data model — ER diagram](architecture.md#data-model--er-diagram) | `stored_files` (with `tenant_id`), `stored_file_metadata` (unused), `storage_cleanups` |
 
 ### [Dependencies](dependencies.md)
 

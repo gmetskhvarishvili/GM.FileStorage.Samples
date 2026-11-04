@@ -1,5 +1,4 @@
 using GM.EntityFramework.Persistence;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.DirectUploadAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileMetadataAggregate.Interfaces;
@@ -33,7 +32,6 @@ public static class DependencyInjection
         services.AddTransient<IStoredFileRepository, StoredFileRepository>();
         services.AddTransient<IStoredFileMetadataRepository, StoredFileMetadataRepository>();
         services.AddTransient<IStorageCleanupRepository, StorageCleanupRepository>();
-        services.AddTransient<IDirectUploadRepository, DirectUploadRepository>();
         services.AddTransient<IUnitOfWork, UnitOfWork.UnitOfWork>();
 
         // Dispatches domain events raised by aggregates (GMStoredFileUploaded/Deleted/Restored, …) to their

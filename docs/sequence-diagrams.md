@@ -17,7 +17,7 @@ The bytes (in storage) and the rows (in Postgres) can't share a transaction. Eve
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the
 worker to delete.
 
-**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [Direct upload](#direct-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
+**Diagrams in this doc:** [Startup](#startup--sequence) · [Gateway forwarding](#gateway-forwarding--sequence) · [Upload](#upload--sequence) · [Batch upload](#batch-upload--sequence) · [List](#list--sequence) · [Details](#details--sequence) · [Download](#download--sequence) · [Delete](#delete--sequence) · [Restore](#restore--sequence) · [Presign](#presign--sequence) · [Encryption at rest](#encryption-at-rest--sequence) · [Storage cleanup](#storage-cleanup--sequence) · [Integrity check](#integrity-check--sequence) · [Retention](#retention--sequence) · [Health checks](#health-checks--sequence) · [Swagger via gateway](#swagger-via-gateway--sequence)  
 All diagrams: [index](README.md)
 
 ## Startup — sequence
@@ -117,7 +117,6 @@ sequenceDiagram
         S-->>API: size, checksum, content type
         API->>DB: BEGIN
         API->>DB: insert stored_files (id, storage key, …)
-        API->>DB: insert stored_file_metadata (the caller's tenantId, userId)
         API->>DB: delete the queued entry
         API->>DB: insert domain event (uploaded)
         API->>DB: COMMIT
@@ -168,7 +167,7 @@ sequenceDiagram
         B->>U: UploadFileCommand (the caller's tenant and user)
         U->>DB: queue the storage key
         U->>S: upload (rules checked)
-        U->>DB: one transaction: file row, metadata, drop the queued entry
+        U->>DB: one transaction: file row, drop the queued entry
         alt stored
             U-->>B: id, fileName, …
             B->>B: result: succeeded
@@ -191,46 +190,6 @@ Every file goes through the full single-file sequence above, in its own transact
 before and after it untouched. A cancelled request (the client disconnects) stops the batch; the files already
 stored stay.
 
-## Direct upload — sequence
-
-`POST /api/v1/files/direct-uploads`, the client's PUT, then `POST …/direct-uploads/{uploadId}/complete`
-
-```mermaid
----
-title: Direct upload — sequence
----
-sequenceDiagram
-    autonumber
-    actor C as Client
-    participant API
-    participant DB
-    participant S as Storage
-
-    C->>API: start (fileName, contentType, size)
-    API->>API: upload permit, type allowed, size ≤ 5 GB
-    API->>API: new upload id, storage key from KeyTemplate on it
-    API->>S: GetPresignedUrlAsync(key, Write, 1 hour)
-    API->>DB: one transaction: direct_uploads row,<br/>storage_cleanups (key, due when the link expires + 15 min)
-    API-->>C: uploadId, url, PUT, headers, expiresAtUtc
-
-    C->>S: PUT url with the bytes (on local disk, the API's /files takes it)
-
-    C->>API: complete (uploadId)
-    API->>DB: the pending upload
-    API->>S: exists? then the first bytes and real size (a ranged read)
-    alt wrong size or type
-        API->>DB: forget the upload
-        API->>S: delete the bytes (left queued if this fails)
-        API-->>C: 400
-    else matches
-        API->>DB: one transaction: stored_files + metadata,<br/>remove the upload and its cleanup entry
-        API-->>C: 200 { id (the upload's), size }
-    end
-```
-
-An upload that's never completed is forgotten by the worker once its link expires, and its bytes deleted with the
-cleanup entry queued at the start.
-
 ## List — sequence
 
 `GET /api/v1/files?userId=&contentType=&currentPage=&pageSize=` with an optional `X-Tenant-Id`
@@ -246,15 +205,16 @@ sequenceDiagram
 
     API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, content type, dates, visibility)
     opt total count requested
-        API->>DB: SELECT count(*) … WHERE metadata EXISTS (name, value) …
+        API->>DB: SELECT count(*) … WHERE tenant_id = … AND created_by = …
     end
-    API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET (with metadata)
+    API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET
     DB-->>API: rows
-    API->>API: map: metadata → map (the storage key stays inside)
+    API->>API: map: created_by → uploadedBy (the storage key stays inside)
     API-->>API: 200 [files] + X-Pagination
 ```
 
-The tenant is always the caller's. Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
+The tenant is always the caller's: a plain filter on the indexed `tenant_id` column. The user filter matches the
+uploader, `created_by`.
 
 ## Details — sequence
 
@@ -269,7 +229,7 @@ sequenceDiagram
     participant API
     participant DB
 
-    API->>DB: SELECT file + metadata WHERE id = … <br/>and not deleted / hidden / inactive unless visibility includes them
+    API->>DB: SELECT file WHERE id = … AND tenant_id = …<br/>and not deleted / hidden / inactive unless visibility includes them
     alt no row
         API-->>API: 404
     else
@@ -332,7 +292,7 @@ sequenceDiagram
     alt not found or already deleted
         API-->>API: 404
     else
-        API->>API: SoftRemove (row and its metadata)
+        API->>API: SoftRemove
         API->>DB: UPDATE + domain event (deleted), one transaction
         API-->>API: 204
     end
@@ -361,7 +321,7 @@ sequenceDiagram
     alt bytes gone (removed out of band)
         API-->>API: 404
     else
-        API->>API: RestoreAll (row and its metadata)
+        API->>API: RestoreAll
         API->>DB: UPDATE + domain event (restored), one transaction
         API-->>API: 204
     end
@@ -524,7 +484,7 @@ sequenceDiagram
                 W->>DB: problem = altered or truncated
             else wrong size
                 W->>DB: problem = size differs from the record
-            else no checksum recorded yet (a direct upload)
+            else no checksum recorded yet
                 W->>DB: record the checksum, no problem
             else checksum differs
                 W->>DB: problem = checksum mismatch
@@ -554,7 +514,7 @@ sequenceDiagram
     participant S as Storage
 
     W->>DB: deleted files with deleted_at_utc older than 30 days, 100 per run
-    W->>DB: one transaction: remove their rows and metadata,<br/>queue each storage key for cleanup (due now)
+    W->>DB: one transaction: remove their rows,<br/>queue each storage key for cleanup (due now)
     W->>S: delete the bytes
     alt a delete failed
         Note over W,DB: left queued for the storage-cleanup job

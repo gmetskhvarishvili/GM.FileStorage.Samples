@@ -75,7 +75,7 @@ flowchart LR
   uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate`, in an object named after the id
   (see below), which stays internal.
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
-  then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
+  then records a `StoredFile` row, with the caller's tenant (`tenant_id`) and uploader (`created_by`), and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
   storage never keeps unreferenced objects.
 - **Uploads stream, never buffer.** The upload endpoints take no `IFormFile` (binding one makes ASP.NET buffer the
@@ -90,16 +90,12 @@ flowchart LR
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
 - **Files counted per client, not requests.** Every uploaded file takes a permit from
-  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single, batch and direct uploads alike: a batch of
+  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single and batch uploads alike: a batch of
   20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
   limits requests on top.
-- **Direct uploads for large files.** `POST /files/direct-uploads` returns a presigned write link (up to 5 GB, an hour
-  to use it); the client sends the bytes straight to S3 or Azure, then completes the upload. The API checks the stored
-  object (size, and its first bytes against the declared type) before recording it, and deletes what doesn't match.
-  On local disk the link is signed and the API's `/files` takes the PUT. Not available with encryption at rest.
 - **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
   runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
-  nothing and counts no file. That covers a single upload, a batch, starting a direct upload and completing one. Only
+  nothing and counts no file. That covers a single upload and a batch. Only
   successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
   while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
   the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the
@@ -110,11 +106,11 @@ flowchart LR
 - **Integrity checks.** Every 5 minutes the worker reads a batch of stored files back (decrypted when encryption is
   on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
   as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
-  `integrityProblem=true`. Direct uploads, recorded without a checksum, get one here.
+  `integrityProblem=true`. A file recorded without a checksum gets one here.
 - **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
   `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
-- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged
-  and direct uploads in progress. An upload that would go past it gets a `400`, and its bytes are deleted.
+- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged.
+  An upload that would go past it gets a `400`, and its bytes are deleted.
   `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
@@ -125,12 +121,15 @@ flowchart LR
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
   and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
   didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
-  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the user is `anon`. The gateway passes
+  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the uploader is left empty. The gateway passes
   the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
   sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
   sets them from the token.
-- **Searchable metadata.** The list filters by user with `Metadata.Any(...)` sub-queries served by the
-  `(name, value)` index, plus content type and integrity problems, with GM.API paging (`X-Pagination` header).
+- **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
+  column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
+  filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
+  GM.FileStorage's name/value metadata table (`stored_file_metadata`) is still mapped but left empty: it's for
+  labels that vary from file to file, which this sample doesn't take.
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -162,8 +161,8 @@ still tell which file an object belongs to.
   folders per category and no folder grows huge.
 - **`{id}{ext}` is the file's id plus its extension, cleaned up.** The sample picks the id first and hands it
   to the key strategy (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
-- **Nothing identifying.** Tenant, user and date stay out of the path. They're searchable metadata in
-  the catalog, which is how files are found.
+- **Nothing identifying.** Tenant, user and date stay out of the path. They're columns in the catalog,
+  which is how files are found.
 - **Other layouts are a config change.**
   - `{date:yyyy/MM}/{id}{ext}` gives date folders.
   - `{meta:tenantId}/{category}/{id}{ext}` gives per-tenant folders. Metadata values are cleaned
@@ -180,7 +179,7 @@ always queued for deletion in the `storage_cleanups` table.
 - **Upload** ([UploadFileCommand](GM.FileStorage.Sample.Application/Files/Commands/UploadFile/UploadFileCommand.cs)):
   1. Queue the new storage key for cleanup, due in 15 minutes, before any bytes exist.
   2. Upload the bytes.
-  3. In one transaction: create the row and its metadata rows, and drop the queued entry.
+  3. In one transaction: create the row and drop the queued entry.
 
   | If this happens… | …the result |
   | --- | --- |
@@ -229,17 +228,14 @@ because a direct link would serve ciphertext.
 | --- | --- | --- |
 | `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
 | `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, metadata and last integrity check included |
+| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/api/v1/files/{id}/presign` | A time-limited link. S3 and Azure sign their own; on local disk it's signed with `FileStorage:Local:SigningKey` and served below |
-| `POST` | `/api/v1/files/direct-uploads` | Start a direct upload (JSON `fileName`, `contentType`, `size`): returns `uploadId`, a presigned write `url`, `method`, `headers`, `expiresAtUtc` |
-| `POST` | `/api/v1/files/direct-uploads/{uploadId}/complete` | After sending the bytes: checks the stored object and records the file (`400` and deleted if it doesn't match) |
 | `GET` | `/files/{storageKey}?expires=&op=&sig=` | Serves a local-disk presigned link: `403` if forged, altered or expired, `404` if the file was deleted since |
-| `PUT` | `/files/{storageKey}?expires=&op=write&sig=` | Takes a local-disk direct upload's bytes (S3 and Azure take theirs themselves) |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
@@ -358,8 +354,7 @@ against a throwaway storage root and drive it over HTTP: upload (stored under it
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
-the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), direct
-uploads (start, PUT, complete, and the checks that delete mismatched bytes), integrity checks flagging damaged or
+the upload rules, the cleanup job, presigned links (served, or refused when altered or the file is deleted), integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
 `PUT` on a file's content being refused (405). They need PostgreSQL and
