@@ -67,10 +67,12 @@ public class UploadFileCommandHandler(
             [StoredFileMetadataNames.UserId] = actor.UserOrAnonymous(),
         };
 
-        // Where these bytes go: a path from FileStorage:KeyTemplate. It's needed before the upload (it's queued
-        // first), so it's built from the declared content type; with FileStorage:VerifyContentType on, a declaration
-        // the bytes don't match is rejected by the upload, so the {category} folder can't lie.
-        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType });
+        // The file's id, and where its bytes go: a path from FileStorage:KeyTemplate built on that id, so the stored
+        // object is named after the file. It's needed before the upload (it's queued first), so it's built from the
+        // declared content type; with FileStorage:VerifyContentType on, a declaration the bytes don't match is
+        // rejected by the upload, so the {category} folder can't lie.
+        var id = Guid.NewGuid();
+        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType, Id = id });
 
         // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
         // upload has streamed, so it's checked again then).
@@ -124,7 +126,7 @@ public class UploadFileCommandHandler(
         StoredFile entity;
         try
         {
-            entity = StoredFile.Create(Guid.NewGuid(), storageKey, stored.FileName, stored.ContentType, stored.Size,
+            entity = StoredFile.Create(id, storageKey, stored.FileName, stored.ContentType, stored.Size,
                 stored.Checksum, stored.Visibility == FileVisibility.Public,
                 stored.LastModifiedUtc?.UtcDateTime ?? DateTime.UtcNow);
             await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
@@ -156,7 +158,6 @@ public class UploadFileCommandHandler(
         return new UploadedFileDto
         {
             Id = entity.Id,
-            StorageKey = StorageKeys.Name(entity.StorageKey),
             FileName = entity.FileName,
             ContentType = entity.ContentType,
             Size = entity.Size,
@@ -170,9 +171,6 @@ public class UploadedFileDto
 {
     /// <summary>The file's identifier (a GUID): use it for every other call.</summary>
     public Guid Id { get; set; }
-
-    /// <summary>The stored object's name, e.g. <c>9f1c….pdf</c>.</summary>
-    public string? StorageKey { get; set; }
 
     public string? FileName { get; set; }
     public string? ContentType { get; set; }

@@ -7,7 +7,7 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 
 public class StoredFileSpecification : BaseSpecification<StoredFile>
 {
-    public StoredFileSpecification(Guid? id, string? tenantId, string? userId, string? folder, string? contentType,
+    public StoredFileSpecification(Guid? id, string? tenantId, string? userId, string? contentType,
         AuditDateRange dateRange, PagingOptions paging, OrderingOptions ordering,
         VisibilityScope visibility = VisibilityScope.VisibleOnly, bool? integrityProblem = null)
     {
@@ -24,9 +24,6 @@ public class StoredFileSpecification : BaseSpecification<StoredFile>
         if (!string.IsNullOrWhiteSpace(userId))
             AddCriteria(f => f.Metadata.Any(m =>
                 m.Name == StoredFileMetadataNames.UserId && m.Value == userId && !m.IsDeleted));
-
-        if (!string.IsNullOrWhiteSpace(folder))
-            AddCriteria(f => f.StorageKey.StartsWith(folder));
 
         if (!string.IsNullOrWhiteSpace(contentType))
             AddCriteria(f => f.ContentType == contentType);

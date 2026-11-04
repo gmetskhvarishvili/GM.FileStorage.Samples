@@ -29,9 +29,8 @@ namespace GM.FileStorage.Sample.API.Files;
 /// <summary>
 /// Files Controller — upload (one file or a batch), list, inspect, download, delete, restore and presign files. A
 /// file's content never changes after upload; new content is a new file. A file is
-/// identified by one GUID (its id); its bytes are stored under folders laid out by <c>FileStorage:KeyTemplate</c>,
-/// and responses show the stored object's name as <c>storageKey</c> (e.g. <c>9f1c….pdf</c>). The bytes live in the storage provider
-/// behind <c>IFileStorageService</c>; every upload is also recorded in the catalog (a stored-file row plus its
+/// identified by one GUID (its id), and that is all callers see of it: its bytes are stored in the storage provider
+/// behind <c>IFileStorageService</c>, under a folder path from <c>FileStorage:KeyTemplate</c> built on the id; every upload is also recorded in the catalog (a stored-file row plus its
 /// searchable metadata), which is what the list and details endpoints read.
 /// <para>
 /// Every file belongs to the caller's tenant, taken from <c>X-Tenant-Id</c> (GM's actor headers, a token claim once
@@ -50,8 +49,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// </summary>
     /// <remarks>
     /// Multipart <c>file</c>: exactly one (for several, use <c>POST files/batch</c>). Creates a new file identified by
-    /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c>, the stored name returned as
-    /// <c>storageKey</c>. The caller's tenant (<c>X-Tenant-Id</c>, else <c>public</c>) and user (<c>X-User-Id</c>, else
+    /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c> built on it. The caller's tenant (<c>X-Tenant-Id</c>, else <c>public</c>) and user (<c>X-User-Id</c>, else
     /// <c>anon</c>) are recorded as the file's searchable metadata; the file is only ever visible to that tenant.
     /// <para>
     /// The file is streamed from the request straight into storage, never buffered: a file over
@@ -59,7 +57,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// </para>
     /// </remarks>
     /// <param name="cancellationToken"></param>
-    /// <returns>The stored file's id, storage key, size, checksum and content type</returns>
+    /// <returns>The stored file's id, name, size, checksum and content type</returns>
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
     [StreamedMultipartUpload("file")]
@@ -192,7 +190,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// </remarks>
     /// <param name="uploadId">The id from <c>POST files/direct-uploads</c></param>
     /// <param name="cancellationToken"></param>
-    /// <returns>The stored file's id, storage key, size and content type (no checksum: the API never read the bytes)</returns>
+    /// <returns>The stored file's id (the upload's), name, size and content type (no checksum: the API never read the bytes)</returns>
     [HttpPost("files/direct-uploads/{uploadId:guid}/complete", Name = nameof(CompleteDirectUpload))]
     [ProducesResponseType(typeof(UploadedFileModel), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
@@ -209,7 +207,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// <summary>
     /// Get Files List
     /// </summary>
-    /// <param name="request">Files list filters (user, storage folder, …) and paging; always the caller's tenant</param>
+    /// <param name="request">Files list filters (user, content type, …) and paging; always the caller's tenant</param>
     /// <param name="cancellationToken"></param>
     /// <returns>IEnumerable of stored files</returns>
     [HttpGet("files", Name = nameof(GetFilesList))]

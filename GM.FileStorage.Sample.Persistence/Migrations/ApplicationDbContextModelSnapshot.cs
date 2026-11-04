@@ -267,12 +267,6 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_public");
 
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)")
-                        .HasColumnName("key");
-
                     b.Property<long>("Size")
                         .HasColumnType("bigint")
                         .HasColumnName("size");
@@ -304,10 +298,6 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
 
                     b.HasIndex("DeletedAtUtc")
                         .HasDatabaseName("ix_stored_files_deleted_at_utc");
-
-                    b.HasIndex("Key")
-                        .IsUnique()
-                        .HasDatabaseName("ix_stored_files_key");
 
                     b.HasIndex("StorageKey")
                         .IsUnique()

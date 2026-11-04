@@ -8,7 +8,7 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 /// A large file on its way straight into storage: the client was given a presigned link to write
 /// <see cref="StorageKey"/> and, once it has, asks for the file to be recorded. Until then the bytes (if any) belong
 /// to nobody, so the storage key is also queued for cleanup; recording the file removes both. Its id is what the
-/// client completes the upload with.
+/// client completes the upload with, and becomes the file's id (the storage key is built on it).
 /// </summary>
 public class DirectUpload : Entity<Guid>, IAggregateRoot
 {
@@ -18,10 +18,10 @@ public class DirectUpload : Entity<Guid>, IAggregateRoot
 
     private DirectUpload() { } // EF Core materialization
 
-    private DirectUpload(string storageKey, string fileName, string contentType, long size, string tenantId,
+    private DirectUpload(Guid id, string storageKey, string fileName, string contentType, long size, string tenantId,
         string userId, DateTime expiresAtUtc)
     {
-        Id = Guid.NewGuid();
+        Id = id;
         StorageKey = storageKey;
         FileName = fileName;
         ContentType = contentType;
@@ -48,7 +48,7 @@ public class DirectUpload : Entity<Guid>, IAggregateRoot
     /// <summary>When the write link expires (UTC); the upload can't be completed after that.</summary>
     public DateTime ExpiresAtUtc { get; private set; }
 
-    public static DirectUpload Create(string storageKey, string fileName, string contentType, long size,
+    public static DirectUpload Create(Guid id, string storageKey, string fileName, string contentType, long size,
         string tenantId, string userId, DateTime expiresAtUtc) =>
-        new(storageKey, fileName, contentType, size, tenantId, userId, expiresAtUtc);
+        new(id, storageKey, fileName, contentType, size, tenantId, userId, expiresAtUtc);
 }

@@ -55,7 +55,7 @@ public sealed class GatewayTests : IAsyncLifetime
         var tenantId = Guid.NewGuid().ToString();
         client.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
 
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/files?folder=documents%2F")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/files?contentType=application%2Fpdf")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files", PdfForm())).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/v1/files/batch", PdfForm("files"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync("/api/v1/files/6f1e0000-0000-0000-0000-000000000001")).StatusCode);
@@ -70,7 +70,7 @@ public sealed class GatewayTests : IAsyncLifetime
         var received = _api.Requests.ToArray();
         Assert.Equal(
             [
-                "GET /api/v1/files?folder=documents%2F",
+                "GET /api/v1/files?contentType=application%2Fpdf",
                 "POST /api/v1/files",
                 "POST /api/v1/files/batch",
                 "DELETE /api/v1/files/6f1e0000-0000-0000-0000-000000000001",

@@ -114,5 +114,5 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/presign")).StatusCode);
     }
 
-    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
 }

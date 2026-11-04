@@ -100,7 +100,7 @@ its deletes would miss the API's files and the queue would back off forever.
 
 ```jsonc
 "FileStorage": {
-  "KeyTemplate": "{category}/{shard}/{id}{ext}"   // documents/9f/9f1c….pdf
+  "KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1c… → documents/9f/9f1c….pdf
 }
 ```
 

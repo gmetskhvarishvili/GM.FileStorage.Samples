@@ -9,9 +9,9 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 /// The sample's concrete stored-file aggregate root. Its shape and behaviour live in the GM.FileStorage base
 /// <see cref="GMStoredFile{TStoredFile,TStoredFileMetadata}"/>; this type fixes it as the application's aggregate
 /// and exposes the factory, mirroring how the other GM samples specialise their library bases.
-/// A file has one identifier: its <see cref="GMStoredFile{TStoredFile,TStoredFileMetadata}.Key"/> is its id, a
-/// plain GUID. Where the bytes live is separate — the <c>StorageKey</c>, a folder path from the key template
-/// (e.g. <c>documents/9f/9f1c….pdf</c>). A file's content never changes after upload.
+/// A file has one identifier, its id (a GUID). Its bytes live at the <c>StorageKey</c>, a folder path from the key
+/// template built on that id (<c>documents/6f/6f1e….pdf</c> for file <c>6f1e…</c>). A file's content never changes
+/// after upload.
 /// </summary>
 public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggregateRoot
 {
@@ -26,7 +26,7 @@ public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggrega
         string? checksum,
         bool isPublic,
         DateTime uploadedAtUtc)
-        : base(id, id.ToString(), storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc) { }
+        : base(id, storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc) { }
 
     public const int IntegrityProblemMaxLength = 256;
 

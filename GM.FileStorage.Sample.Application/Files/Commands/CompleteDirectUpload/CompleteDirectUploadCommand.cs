@@ -75,7 +75,7 @@ public class CompleteDirectUploadCommandHandler(
         var pending = await unitOfWork.StorageCleanupRepository
             .FirstOrDefaultAsync(x => x.StorageKey == upload.StorageKey, false, null, cancellationToken);
 
-        var entity = StoredFile.Create(Guid.NewGuid(), upload.StorageKey, upload.FileName, upload.ContentType, size,
+        var entity = StoredFile.Create(upload.Id, upload.StorageKey, upload.FileName, upload.ContentType, size,
             checksum: null, isPublic: false, DateTime.UtcNow);
         await unitOfWork.StoredFileRepository.AddAsync(entity, cancellationToken);
         foreach (var (name, value) in new Dictionary<string, string>
@@ -97,7 +97,6 @@ public class CompleteDirectUploadCommandHandler(
         return new UploadedFileDto
         {
             Id = entity.Id,
-            StorageKey = StorageKeys.Name(entity.StorageKey),
             FileName = entity.FileName,
             ContentType = entity.ContentType,
             Size = entity.Size,

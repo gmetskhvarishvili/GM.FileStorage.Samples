@@ -104,7 +104,7 @@ sequenceDiagram
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
     API->>API: validate (file name, content type), tenant from X-Tenant-Id or public
-    API->>API: storage key from KeyTemplate<br/>documents/9f/9f1c….pdf
+    API->>API: new file id, storage key from KeyTemplate on it<br/>documents/9f/9f1c….pdf
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
     S->>S: check allowed type and bytes from the first bytes,<br/>count size as it streams
@@ -131,7 +131,7 @@ sequenceDiagram
                 API->>S: delete the bytes (left queued if this fails)
                 API-->>C: 400 use /files/batch, nothing kept
             else
-                API-->>C: 200 { id, storageKey: "9f1c….pdf", … }
+                API-->>C: 200 { id: "9f1c…", fileName, … }
             end
         end
     end
@@ -170,7 +170,7 @@ sequenceDiagram
         U->>S: upload (rules checked)
         U->>DB: one transaction: file row, metadata, drop the queued entry
         alt stored
-            U-->>B: id, storageKey, …
+            U-->>B: id, fileName, …
             B->>B: result: succeeded
         else validation or upload rule failed
             U-->>B: ValidationException / BadRequestException
@@ -208,7 +208,7 @@ sequenceDiagram
 
     C->>API: start (fileName, contentType, size)
     API->>API: upload permit, type allowed, size ≤ 5 GB
-    API->>API: storage key from KeyTemplate
+    API->>API: new upload id, storage key from KeyTemplate on it
     API->>S: GetPresignedUrlAsync(key, Write, 1 hour)
     API->>DB: one transaction: direct_uploads row,<br/>storage_cleanups (key, due when the link expires + 15 min)
     API-->>C: uploadId, url, PUT, headers, expiresAtUtc
@@ -224,7 +224,7 @@ sequenceDiagram
         API-->>C: 400
     else matches
         API->>DB: one transaction: stored_files + metadata,<br/>remove the upload and its cleanup entry
-        API-->>C: 200 { id, storageKey, size }
+        API-->>C: 200 { id (the upload's), size }
     end
 ```
 
@@ -233,7 +233,7 @@ cleanup entry queued at the start.
 
 ## List — sequence
 
-`GET /api/v1/files?userId=&folder=&contentType=&currentPage=&pageSize=` with an optional `X-Tenant-Id`
+`GET /api/v1/files?userId=&contentType=&currentPage=&pageSize=` with an optional `X-Tenant-Id`
 
 ```mermaid
 ---
@@ -244,18 +244,17 @@ sequenceDiagram
     participant API
     participant DB
 
-    API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, folder, content type, dates, visibility)
+    API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, content type, dates, visibility)
     opt total count requested
         API->>DB: SELECT count(*) … WHERE metadata EXISTS (name, value) …
     end
     API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET (with metadata)
     DB-->>API: rows
-    API->>API: map: storage key → name only, metadata → map
+    API->>API: map: metadata → map (the storage key stays inside)
     API-->>API: 200 [files] + X-Pagination
 ```
 
 The tenant is always the caller's. Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
-The folder filter is a prefix match on the storage key.
 
 ## Details — sequence
 
@@ -274,7 +273,7 @@ sequenceDiagram
     alt no row
         API-->>API: 404
     else
-        API-->>API: 200 details (storage key as name only)
+        API-->>API: 200 details
     end
 ```
 

@@ -104,32 +104,29 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = Client(_factory);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: the file is a GUID; where its bytes went is visible — folders from the key template.
+        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit under {category}/{shard}/
+        // folders from the key template, named after that id (the shard is its first two characters).
         var uploaded = await UploadAsync(client, original, "passport.pdf");
         Assert.NotEqual(Guid.Empty, uploaded.Id);
-        // Callers see just the stored name; inside, it sits in {category}/{shard}/ folders (the shard is the name's
-        // first two characters), which the catalog keeps.
-        Assert.Matches(@"^[0-9a-f]{32}\.pdf$", uploaded.StorageKey);
+        var hex = uploaded.Id.ToString("N");
         var path = await StoragePathAsync(uploaded.Id);
-        Assert.Equal($"{_tenantId}/documents/{uploaded.StorageKey[..2]}/{uploaded.StorageKey}", path);
+        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", path);
         Assert.True(File.Exists(Path.Combine(_root, path)));
         Assert.Equal(original.Length, uploaded.Size);
 
-        // List by tenant: exactly this file, with its storage location and metadata.
+        // List by tenant: exactly this file, with its metadata and nothing of where it's stored.
         var listed = Assert.Single(await ListAsync(client, ""));
-        Assert.Equal((uploaded.Id, uploaded.StorageKey), (listed.Id, listed.StorageKey));
+        Assert.Equal(uploaded.Id, listed.Id);
+        Assert.DoesNotContain("storageKey", await client.GetStringAsync("/api/v1/files"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(_tenantId, listed.Metadata!["tenantId"]);
         Assert.Equal(_userId, listed.Metadata!["userId"]);
         Assert.Single(await ListAsync(client, $"userId={_userId}"));
         Assert.Empty(await ListAsync(client, $"userId={Guid.NewGuid()}"));
-        // Storage folders double as a filter.
-        Assert.Single(await ListAsync(client, $"folder={Uri.EscapeDataString($"{_tenantId}/documents/")}"));
-        Assert.Empty(await ListAsync(client, $"folder={Uri.EscapeDataString($"{_tenantId}/images/")}"));
 
         // Details by id.
         var details = await client.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{uploaded.Id}");
         Assert.NotNull(details);
-        Assert.Equal(("passport.pdf", "application/pdf", uploaded.StorageKey), (details.FileName, details.ContentType, details.StorageKey));
+        Assert.Equal(("passport.pdf", "application/pdf"), (details.FileName, details.ContentType));
         Assert.False(details.IsDeleted);
 
         // Download: byte-for-byte; presign: a link.
@@ -417,7 +414,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Empty(await ListAsync(client, ""));
 
         var completed = await ExpectOkAsync(client.PostAsync($"/api/v1/files/direct-uploads/{started.UploadId}/complete", null));
-        Assert.Equal(("big.pdf", (long)bytes.Length), (completed.FileName, completed.Size));
+        Assert.Equal((started.UploadId, "big.pdf", (long)bytes.Length), (completed.Id, completed.FileName, completed.Size));
+        var hex = completed.Id.ToString("N");
+        Assert.Equal($"{_tenantId}/documents/{hex[..2]}/{hex}.pdf", await StoragePathAsync(completed.Id));
         Assert.Null(completed.Checksum); // the API never read the bytes
         var listed = Assert.Single(await ListAsync(client, $"userId={_userId}"));
         Assert.Equal(completed.Id, listed.Id);
@@ -880,7 +879,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         return result;
     }
 
-    private sealed record UploadResponse(Guid Id, string StorageKey, string FileName, string ContentType, long Size, string? Checksum);
+    private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
 
     // Counts the request bytes the app reads, and notes how many it had read when the response started.
     private sealed class BodyReadCounter : IStartupFilter
@@ -954,7 +953,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     private sealed record StoredFileResponse(
         Guid Id,
-        string StorageKey,
         string FileName,
         string ContentType,
         long Size,

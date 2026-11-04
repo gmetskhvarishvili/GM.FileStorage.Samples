@@ -269,7 +269,6 @@ classDiagram
     class GMStoredFile~TFile,TMetadata~ {
         <<GM.FileStorage.Domain>>
         +Guid Id
-        +string Key
         +string StorageKey
         +string FileName
         +string ContentType

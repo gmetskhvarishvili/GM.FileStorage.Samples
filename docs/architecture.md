@@ -98,8 +98,7 @@ erDiagram
     stored_files ||--o{ stored_file_metadata : has
     stored_files {
         uuid id PK "the file's id; every route uses it"
-        string key "same as id"
-        string storage_key UK "where the bytes are, e.g. documents/9f/9f1c….pdf"
+        string storage_key UK "where the bytes are, named after the id: documents/9f/9f1c….pdf"
         string file_name
         string content_type
         bigint size

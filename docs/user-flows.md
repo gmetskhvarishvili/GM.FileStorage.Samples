@@ -82,7 +82,7 @@ flowchart TD
     saved -- no --> e500[500<br/>bytes deleted or queued]
     saved -- yes --> more{Another file part<br/>after it?}
     more -- yes --> m400[400 use /files/batch<br/>the stored file is discarded]
-    more -- no --> ok[200 id, storageKey, fileName,<br/>contentType, size, checksum]
+    more -- no --> ok[200 id, fileName,<br/>contentType, size, checksum]
     ok --> next([Keep the id: every other call uses it])
 ```
 
@@ -109,7 +109,7 @@ flowchart TD
     each --> limit{Already 20 files?}
     limit -- yes --> c400[400 too many files<br/>the stored ones are discarded]
     limit -- no --> one{Stored as<br/>POST /files would?}
-    one -- yes --> okItem[succeeded: true<br/>file: id, storageKey, …]
+    one -- yes --> okItem[succeeded: true<br/>file: id, fileName, …]
     one -- "no: validation or upload rule" --> badItem[succeeded: false<br/>error: the reason]
     one -- "no: server fault" --> errItem[succeeded: false<br/>error: try again]
     okItem --> more{More files?}
@@ -148,7 +148,7 @@ flowchart TD
     there -- no --> t400[400 nothing uploaded yet<br/>upload stays open]
     there -- yes --> match{Declared size, and<br/>declared type by its bytes?}
     match -- no --> m400[400, bytes deleted<br/>start again]
-    match -- yes --> ok[200 id, storageKey, size<br/>checksum: null]
+    match -- yes --> ok[200 id = uploadId, size<br/>checksum: null]
 ```
 
 For files too large to send through the API. The bytes never pass through it (on S3 and Azure), so the file has
@@ -162,7 +162,7 @@ encryption at rest: the client can't encrypt for the API.
 title: List — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files<br/>X-Tenant-Id?]) --> filters[Optional filters:<br/>userId · folder · contentType<br/>dates · visibility]
+    start([GET /api/v1/files<br/>X-Tenant-Id?]) --> filters[Optional filters:<br/>userId · contentType · integrityProblem<br/>dates · visibility]
     filters --> paging[Optional paging:<br/>currentPage · pageSize · ordering]
     paging --> res[200 page of files<br/>+ X-Pagination header]
     res --> more{More pages?}
@@ -183,7 +183,7 @@ flowchart TD
     guid -- no --> n404[404 no such route]
     guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
-    exists -- yes --> ok[200 details:<br/>storageKey, size, checksum,<br/>metadata, audit dates]
+    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>metadata, audit dates]
 ```
 
 ## Download — user flow

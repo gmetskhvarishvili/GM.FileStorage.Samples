@@ -50,16 +50,16 @@ flowchart LR
 | [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
 | [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
-> Every `GM.FileStorage*` reference here is pinned to **2.0.2** (the packages release in lockstep). 2.0.0 added
+> Every `GM.FileStorage*` reference here is pinned to **3.0.0** (the packages release in lockstep). 2.0.0 added
 > encryption at rest, key templates and upload rules, and removed `GMStoredFile.Replace`: a file's content
-> never changes after upload. 2.0.1 measures an upload's size instead of trusting the stream; 2.0.2 fixes S3
-> presigned links on plain-HTTP endpoints and checksum checks on ranged S3 downloads.
+> never changes after upload. 2.1.0 signs local-disk presigned links, 2.2.0 records checksums measured after
+> upload, and 3.0.0 removes `GMStoredFile.Key`: a file is its id, and key templates can build on it.
 
 ## Layers
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, storage folder, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` / `StoredFileMetadata` aggregates (specialising GM.FileStorage's `GMStoredFile` / `GMStoredFileMetadata`), repository interfaces, `StoredFileSpecification` (visibility, tenant/user metadata, content type, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`, `GetFilePresignedUrl`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` / `stored_file_metadata` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
@@ -71,9 +71,9 @@ flowchart LR
 
 ## What it demonstrates
 
-- **One GUID per file; its storage location shown.** A file is identified by a GUID, its id, which is also
-  its key; every route uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate` (see
-  below). Responses show only the stored object's name, as `storageKey`; the folders stay internal.
+- **One GUID per file.** A file is identified by a GUID, its id, and that's all a caller sees; every route
+  uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate`, in an object named after the id
+  (see below), which stays internal.
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
   then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
@@ -130,7 +130,7 @@ flowchart LR
   sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
   sets them from the token.
 - **Searchable metadata.** The list filters by user with `Metadata.Any(...)` sub-queries served by the
-  `(name, value)` index, plus storage folder and content type, with GM.API paging (`X-Pagination` header).
+  `(name, value)` index, plus content type and integrity problems, with GM.API paging (`X-Pagination` header).
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -142,15 +142,15 @@ flowchart LR
 
 ## Storage layout
 
-A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is a separate
-**storage key**, made from `FileStorage:KeyTemplate` in appsettings.json, with no code involved:
+A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is its **storage key**,
+made from `FileStorage:KeyTemplate` in appsettings.json and built on that id, with no code involved:
 
 ```jsonc
-"KeyTemplate": "{category}/{shard}/{id}{ext}"   // → documents/9f/9f1cb2…a3.pdf, images/4e/4e07…png
+"KeyTemplate": "{category}/{shard}/{id}{ext}"   // file 9f1cb2d4-… → documents/9f/9f1cb2d4….pdf
 ```
 
-Responses show only the stored object's name as `storageKey` (`9f1cb2…a3.pdf`); the folders are an internal
-layout detail.
+The storage key never leaves the API: callers only ever use the id. Anyone browsing the bucket or the disk can
+still tell which file an object belongs to.
 
 - **`{category}` can't lie.** It's `documents`, `images`, `videos`, `audio`, `archives` or `other`,
   from the content type. With `VerifyContentType` on, an upload whose bytes don't match its declared
@@ -160,8 +160,8 @@ layout detail.
   - When the library generates the key itself, it uses the detected type instead.
 - **`{shard}` spreads files out.** It's the first two characters of `{id}`, so files spread over 256
   folders per category and no folder grows huge.
-- **`{id}{ext}` is a random id plus the file's extension, cleaned up.** `{id}` is required, so
-  storage keys never collide.
+- **`{id}{ext}` is the file's id plus its extension, cleaned up.** The sample picks the id first and hands it
+  to the key strategy (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
 - **Nothing identifying.** Tenant, user and date stay out of the path. They're searchable metadata in
   the catalog, which is how files are found.
 - **Other layouts are a config change.**
@@ -170,7 +170,6 @@ layout detail.
     before use, so they can't add folders or `..`.
   - The template is checked at startup, so a typo fails fast.
 
-The folders also work as a list filter, for example `GET /api/v1/files?folder=images/`.
 
 ## Keeping storage and the database in step
 
@@ -228,9 +227,9 @@ because a direct link would serve ciphertext.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), `storageKey` (the stored name), size, checksum |
+| `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
 | `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?userId=&folder=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, storage key, metadata and last integrity check included |
+| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, metadata and last integrity check included |
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
@@ -309,7 +308,7 @@ Then call the gateway, as a tenant (any GUID; leave `-H "$T"` out to use the sha
 T="X-Tenant-Id: 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71"
 
 curl -H "$T" -F "file=@passport.pdf" "https://localhost:7141/api/v1/files"
-# { "id": "6f1e…-…", "storageKey": "9f1cb2…a3.pdf", "fileName": "passport.pdf", "size": 12345, … }
+# { "id": "6f1e…-…", "fileName": "passport.pdf", "contentType": "application/pdf", "size": 12345, … }
 
 curl -H "$T" -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch"
 # [ { "fileName": "visa.pdf", "succeeded": true, "file": { "id": "…", … } }, { "fileName": "contract.docx", … } ]
@@ -355,7 +354,7 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)
-against a throwaway storage root and drive it over HTTP: upload → list by user/storage folder → details →
+against a throwaway storage root and drive it over HTTP: upload (stored under its own id) → list by user → details →
 download → presign → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,

@@ -74,7 +74,9 @@ public class StartDirectUploadCommandHandler(
             [StoredFileMetadataNames.TenantId] = tenantId,
             [StoredFileMetadataNames.UserId] = userId,
         };
-        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType });
+        // The upload's id becomes the file's, so the key is built on it.
+        var id = Guid.NewGuid();
+        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType, Id = id });
 
         Uri url;
         try
@@ -89,7 +91,7 @@ public class StartDirectUploadCommandHandler(
         }
 
         var expiresAtUtc = DateTime.UtcNow.Add(limits.LinkExpiry);
-        var upload = DirectUpload.Create(storageKey, request.FileName!, request.ContentType!, request.Size, tenantId, userId, expiresAtUtc);
+        var upload = DirectUpload.Create(id, storageKey, request.FileName!, request.ContentType!, request.Size, tenantId, userId, expiresAtUtc);
         await unitOfWork.DirectUploadRepository.AddAsync(upload, cancellationToken);
         await unitOfWork.StorageCleanupRepository.AddAsync(
             StorageCleanup.Create(storageKey, expiresAtUtc.Add(StorageCleanup.PendingUploadGracePeriod)), cancellationToken);
