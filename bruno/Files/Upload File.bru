@@ -1,0 +1,46 @@
+meta {
+  name: Upload File
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{gateway}}/api/v1/files
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Idempotency-Key: {{retryKey}}
+}
+
+body:multipart-form {
+  file: @file(sample-files/passport.pdf)
+}
+
+script:pre-request {
+  // The key Upload File Again resends: a retry with it is replayed, not stored again.
+  const hex = () => Math.floor(Math.random() * 16).toString(16);
+  bru.setEnvVar("retryKey", "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, hex));
+}
+
+script:post-response {
+  bru.setEnvVar("fileId", res.getBody().id);
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("returns the stored file", function () {
+    const body = res.getBody();
+    expect(body.id).to.match(/^[0-9a-f-]{36}$/i);
+    expect(body).to.include({ fileName: "passport.pdf", contentType: "application/pdf" });
+    expect(body.checksum).to.match(/^[0-9a-f]{64}$/);
+  });
+}
+
+docs {
+  One multipart `file`, streamed into storage. Saves its id as fileId.
+}

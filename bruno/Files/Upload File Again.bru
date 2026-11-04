@@ -1,0 +1,34 @@
+meta {
+  name: Upload File Again
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{gateway}}/api/v1/files
+  body: multipartForm
+  auth: none
+}
+
+headers {
+  Idempotency-Key: {{retryKey}}
+}
+
+body:multipart-form {
+  file: @file(sample-files/passport.pdf)
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("replays the first upload instead of storing it again", function () {
+    expect(res.getHeader("idempotency-replayed")).to.equal("true");
+    expect(res.getBody().id).to.equal(bru.getEnvVar("fileId"));
+  });
+}
+
+docs {
+  A retry: the same Idempotency-Key as Upload File, so the first response comes back (Idempotency-Replayed: true) and nothing is stored or counted again.
+}

@@ -1,0 +1,31 @@
+meta {
+  name: Upload Files
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{gateway}}/api/v1/files/batch
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  files: @file(sample-files/passport.pdf|sample-files/photo.png)
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("stores each file on its own", function () {
+    const results = res.getBody();
+    expect(results).to.have.lengthOf(2);
+    results.forEach(r => expect(r.succeeded, r.error).to.equal(true));
+  });
+}
+
+docs {
+  Up to 20 multipart `files`, each stored as Upload File would; one result per file, in order.
+}

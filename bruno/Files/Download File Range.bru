@@ -1,0 +1,30 @@
+meta {
+  name: Download File Range
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{gateway}}/api/v1/files/{{fileId}}/content
+  body: none
+  auth: none
+}
+
+headers {
+  Range: bytes=0-7
+}
+
+tests {
+  test("returns 206", function () {
+    expect(res.getStatus()).to.equal(206);
+  });
+  
+  test("returns only the requested bytes", function () {
+    expect(res.getHeader("content-range")).to.match(/^bytes 0-7\/\d+$/);
+    expect(String(res.getBody())).to.equal("%PDF-1.4");
+  });
+}
+
+docs {
+  One HTTP Range: 206 Partial Content with only those bytes, as video players and resumed downloads use.
+}

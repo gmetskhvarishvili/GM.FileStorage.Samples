@@ -1,0 +1,44 @@
+meta {
+  name: Get Files List
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{gateway}}/api/v1/files?currentPage=1&pageSize={{pageSize}}&orderBy=CreatedAt desc
+  body: none
+  auth: none
+}
+
+params:query {
+  currentPage: 1
+  pageSize: {{pageSize}}
+  orderBy: CreatedAt desc
+  ~userId: {{userId}}
+  ~contentType: application/pdf
+  ~integrityProblem: true
+  ~visibility: All
+  ~includeTotalCount: true
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+  
+  test("returns the tenant's files, the uploaded one among them", function () {
+    const items = res.getBody();
+    expect(items).to.be.an("array");
+    expect(items.length).to.be.at.most(Number(bru.getEnvVar("pageSize")));
+    expect(items.map(f => f.id)).to.include(bru.getEnvVar("fileId"));
+    items.forEach(f => expect(f.tenantId).to.equal(bru.getEnvVar("tenantId")));
+  });
+  
+  test("sends the X-Pagination header", function () {
+    expect(JSON.parse(res.getHeader("x-pagination")).currentPage).to.equal(1);
+  });
+}
+
+docs {
+  Only the caller's tenant's files. Filters (disabled here): userId (the uploader), contentType, integrityProblem, visibility.
+}

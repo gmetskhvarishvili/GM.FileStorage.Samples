@@ -324,6 +324,20 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 
   Alternatively, keep them in the secrets store named by `SECRETS_PROVIDER`.
 
+## Trying it with Bruno
+
+[`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, through the gateway. Open the
+folder in Bruno, pick the **Local** environment (gateway, API, tenant and user), and run **Files** in order: Upload
+File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key` (replayed), sends a batch
+and a refused type, then lists, reads, downloads a range, checks usage, tries the file as another tenant (404),
+deletes and restores. **Health** checks both services. Every request has tests, so the whole run doubles as a smoke
+test:
+
+```bash
+cd bruno
+npx @usebruno/cli run Files Health --env Local --insecure   # --insecure: the local dev certificate
+```
+
 ## Running in Docker
 
 `docker-compose.yml` runs the whole sample: PostgreSQL, Redis, the API, two workers and the gateway, built from the
