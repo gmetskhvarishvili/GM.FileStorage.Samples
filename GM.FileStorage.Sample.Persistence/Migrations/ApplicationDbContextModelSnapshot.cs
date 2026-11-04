@@ -219,6 +219,12 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                         .HasColumnType("character varying(512)")
                         .HasColumnName("storage_key");
 
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -244,6 +250,9 @@ namespace GM.FileStorage.Sample.Persistence.Migrations
                     b.HasIndex("StorageKey")
                         .IsUnique()
                         .HasDatabaseName("ix_stored_files_storage_key");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_stored_files_tenant_id");
 
                     b.HasIndex("UploadedAtUtc")
                         .HasDatabaseName("ix_stored_files_uploaded_at_utc");

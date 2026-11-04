@@ -36,7 +36,6 @@ public class GetFileDetailsQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         var entity = await unitOfWork.StoredFileRepository
             .Query(true, null)
             .OwnedBy(actor.TenantOrShared())
-            .Include(x => x.Metadata)
             .FirstOrDefaultAsync(x => x.Id == request.Id
                                       && (request.Visibility.HasFlag(VisibilityScope.IncludeInactive) || x.IsActive)
                                       && (request.Visibility.HasFlag(VisibilityScope.IncludeDeleted) || !x.IsDeleted)
@@ -64,7 +63,10 @@ public class StoredFileDetailsDto : AuditableDto
     public string? Checksum { get; set; }
     public bool IsPublic { get; set; }
     public DateTime UploadedAtUtc { get; set; }
-    public IReadOnlyDictionary<string, string>? Metadata { get; set; }
+    public string? TenantId { get; set; }
+
+    /// <summary>The uploader's user id (<c>X-User-Id</c>); null when none was sent.</summary>
+    public Guid? UploadedBy { get; set; }
 
     /// <summary>When the stored bytes were last checked against this record (UTC).</summary>
     public DateTime? VerifiedAtUtc { get; set; }

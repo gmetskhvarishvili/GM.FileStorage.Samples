@@ -114,12 +114,11 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.True(File.Exists(Path.Combine(_root, path)));
         Assert.Equal(original.Length, uploaded.Size);
 
-        // List by tenant: exactly this file, with its metadata and nothing of where it's stored.
+        // List by tenant: exactly this file, with its tenant and uploader and nothing of where it's stored.
         var listed = Assert.Single(await ListAsync(client, ""));
         Assert.Equal(uploaded.Id, listed.Id);
         Assert.DoesNotContain("storageKey", await client.GetStringAsync("/api/v1/files"), StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(_tenantId, listed.Metadata!["tenantId"]);
-        Assert.Equal(_userId, listed.Metadata!["userId"]);
+        Assert.Equal((_tenantId, Guid.Parse(_userId)), (listed.TenantId, listed.UploadedBy));
         Assert.Single(await ListAsync(client, $"userId={_userId}"));
         Assert.Empty(await ListAsync(client, $"userId={Guid.NewGuid()}"));
 
@@ -150,13 +149,13 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/api/v1/files/{uploaded.Id}/restore", null)).StatusCode);
 
-        // Still one row, one metadata row per name, one stored object, and nothing queued.
+        // Still one row (and no metadata rows), one stored object, and nothing queued.
         Assert.Single(StoredObjects());
         Assert.Empty(await CleanupEntriesAsync());
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         Assert.Equal(1, await context.Set<StoredFile>().CountAsync(x => x.Id == uploaded.Id));
-        Assert.Equal(2, await context.Set<StoredFileMetadata>().CountAsync(x => x.StoredFileId == uploaded.Id));
+        Assert.Equal(0, await context.Set<StoredFileMetadata>().CountAsync(x => x.StoredFileId == uploaded.Id));
     }
 
     [Fact]
@@ -255,8 +254,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // (The shared space may hold other files on this database, so it's checked by id.)
         using var nobody = _factory.CreateClient();
         var shared = await UploadAsync(nobody, bytes, "shared.pdf");
-        Assert.Equal(("public", "anon"), (await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}")) is { } s
-            ? (s.Metadata!["tenantId"], s.Metadata!["userId"]) : default);
+        var sharedDetails = await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}");
+        Assert.Equal(("public", (Guid?)null), (sharedDetails!.TenantId, sharedDetails.UploadedBy));
         Assert.Single(await ListAsync(nobody, $"id={shared.Id}"));
         Assert.Equal(HttpStatusCode.OK,
             (await SendFilesAsync(nobody, "/api/v1/files/batch", ("a.pdf", "application/pdf", bytes))).StatusCode);
@@ -841,5 +840,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         string ContentType,
         long Size,
         bool IsDeleted,
-        Dictionary<string, string>? Metadata);
+        string? TenantId,
+        Guid? UploadedBy);
 }

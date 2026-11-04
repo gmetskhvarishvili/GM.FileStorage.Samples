@@ -13,9 +13,9 @@ public class GetFilesListModel : GetBaseListModel
     [Display(ResourceType = typeof(StringResource), Name = "Id")]
     public Guid? Id { get; set; }
 
-    /// <summary>Only files uploaded for this user.</summary>
+    /// <summary>Only files this user uploaded (their <c>X-User-Id</c>).</summary>
     [Display(ResourceType = typeof(StringResource), Name = "UserId")]
-    public string? UserId { get; set; }
+    public Guid? UserId { get; set; }
 
     /// <summary>Only files of this MIME type.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "ContentType")]
