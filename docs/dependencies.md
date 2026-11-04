@@ -286,7 +286,8 @@ classDiagram
         +ChangeValue()
     }
     class StoredFile {
-        +Create(id, storageKey, …)$
+        +string TenantId
+        +Create(id, storageKey, …, tenantId)$
     }
     class StoredFileMetadata {
         +Create(storedFileId, name, value)$

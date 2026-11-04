@@ -117,7 +117,6 @@ sequenceDiagram
         S-->>API: size, checksum, content type
         API->>DB: BEGIN
         API->>DB: insert stored_files (id, storage key, …)
-        API->>DB: insert stored_file_metadata (the caller's tenantId, userId)
         API->>DB: delete the queued entry
         API->>DB: insert domain event (uploaded)
         API->>DB: COMMIT
@@ -168,7 +167,7 @@ sequenceDiagram
         B->>U: UploadFileCommand (the caller's tenant and user)
         U->>DB: queue the storage key
         U->>S: upload (rules checked)
-        U->>DB: one transaction: file row, metadata, drop the queued entry
+        U->>DB: one transaction: file row, drop the queued entry
         alt stored
             U-->>B: id, fileName, …
             B->>B: result: succeeded
@@ -206,15 +205,16 @@ sequenceDiagram
 
     API->>API: build StoredFileSpecification<br/>(the caller's tenant, user, content type, dates, visibility)
     opt total count requested
-        API->>DB: SELECT count(*) … WHERE metadata EXISTS (name, value) …
+        API->>DB: SELECT count(*) … WHERE tenant_id = … AND created_by = …
     end
-    API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET (with metadata)
+    API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET
     DB-->>API: rows
-    API->>API: map: metadata → map (the storage key stays inside)
+    API->>API: map: created_by → uploadedBy (the storage key stays inside)
     API-->>API: 200 [files] + X-Pagination
 ```
 
-The tenant is always the caller's. Tenant and user filters are `EXISTS` sub-queries on `stored_file_metadata`, served by its `(name, value)` index.
+The tenant is always the caller's: a plain filter on the indexed `tenant_id` column. The user filter matches the
+uploader, `created_by`.
 
 ## Details — sequence
 
@@ -229,7 +229,7 @@ sequenceDiagram
     participant API
     participant DB
 
-    API->>DB: SELECT file + metadata WHERE id = … <br/>and not deleted / hidden / inactive unless visibility includes them
+    API->>DB: SELECT file WHERE id = … AND tenant_id = …<br/>and not deleted / hidden / inactive unless visibility includes them
     alt no row
         API-->>API: 404
     else
@@ -292,7 +292,7 @@ sequenceDiagram
     alt not found or already deleted
         API-->>API: 404
     else
-        API->>API: SoftRemove (row and its metadata)
+        API->>API: SoftRemove
         API->>DB: UPDATE + domain event (deleted), one transaction
         API-->>API: 204
     end
@@ -321,7 +321,7 @@ sequenceDiagram
     alt bytes gone (removed out of band)
         API-->>API: 404
     else
-        API->>API: RestoreAll (row and its metadata)
+        API->>API: RestoreAll
         API->>DB: UPDATE + domain event (restored), one transaction
         API-->>API: 204
     end
@@ -514,7 +514,7 @@ sequenceDiagram
     participant S as Storage
 
     W->>DB: deleted files with deleted_at_utc older than 30 days, 100 per run
-    W->>DB: one transaction: remove their rows and metadata,<br/>queue each storage key for cleanup (due now)
+    W->>DB: one transaction: remove their rows,<br/>queue each storage key for cleanup (due now)
     W->>S: delete the bytes
     alt a delete failed
         Note over W,DB: left queued for the storage-cleanup job

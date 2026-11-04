@@ -98,6 +98,7 @@ erDiagram
     stored_files ||--o{ stored_file_metadata : has
     stored_files {
         uuid id PK "the file's id; every route uses it"
+        string tenant_id "X-Tenant-Id or public; indexed, every query is scoped to it"
         string storage_key UK "where the bytes are, named after the id: documents/9f/9f1c….pdf"
         string file_name
         string content_type
@@ -105,11 +106,12 @@ erDiagram
         string checksum
         bool is_public
         bool is_deleted "soft delete; bytes kept"
+        uuid created_by "the uploader's X-User-Id"
     }
     stored_file_metadata {
         uuid id PK
         uuid stored_file_id FK
-        string name "tenantId, userId"
+        string name "free-form labels; unused here"
         string value
         bool is_deleted
     }

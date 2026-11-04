@@ -19,6 +19,10 @@ public class StoredFileConfiguration : GMStoredFileConfiguration<StoredFile, Sto
 
         builder.Property(x => x.IntegrityProblem).HasMaxLength(StoredFile.IntegrityProblemMaxLength);
 
+        // Every query is scoped to a tenant.
+        builder.Property(x => x.TenantId).IsRequired().HasMaxLength(StoredFile.TenantIdMaxLength);
+        builder.HasIndex(x => x.TenantId);
+
         // The retention job finds files deleted long ago; the integrity job, those checked least recently.
         builder.HasIndex(x => x.DeletedAtUtc);
         builder.HasIndex(x => x.VerifiedAtUtc);

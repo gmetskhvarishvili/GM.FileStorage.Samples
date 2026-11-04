@@ -25,10 +25,24 @@ public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggrega
         long size,
         string? checksum,
         bool isPublic,
-        DateTime uploadedAtUtc)
-        : base(id, storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc) { }
+        DateTime uploadedAtUtc,
+        string tenantId)
+        : base(id, storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        if (tenantId.Length > TenantIdMaxLength)
+            throw new ArgumentException($"Must be at most {TenantIdMaxLength} characters.", nameof(tenantId));
+        TenantId = tenantId;
+    }
 
     public const int IntegrityProblemMaxLength = 256;
+    public const int TenantIdMaxLength = 64;
+
+    /// <summary>
+    /// The tenant the file belongs to: the uploader's <c>X-Tenant-Id</c>, or the shared <c>public</c> space. Every
+    /// read and change is scoped to it. The uploader is the audit column <c>CreatedBy</c> (their <c>X-User-Id</c>).
+    /// </summary>
+    public string TenantId { get; private set; } = null!;
 
     /// <summary>When the file was deleted (UTC); null while it's live. Retention purges files deleted long enough ago.</summary>
     public DateTime? DeletedAtUtc { get; private set; }
@@ -61,7 +75,10 @@ public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggrega
         IntegrityProblem = problem;
     }
 
-    /// <summary>Records a file, identified by <paramref name="id"/>, whose bytes were just stored at <paramref name="storageKey"/>.</summary>
+    /// <summary>
+    /// Records a file, identified by <paramref name="id"/>, whose bytes were just stored at <paramref name="storageKey"/>,
+    /// for <paramref name="tenantId"/>.
+    /// </summary>
     public static StoredFile Create(
         Guid id,
         string storageKey,
@@ -70,6 +87,7 @@ public class StoredFile : GMStoredFile<StoredFile, StoredFileMetadata>, IAggrega
         long size,
         string? checksum,
         bool isPublic,
-        DateTime uploadedAtUtc) =>
-        new(id, storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc);
+        DateTime uploadedAtUtc,
+        string tenantId) =>
+        new(id, storageKey, fileName, contentType, size, checksum, isPublic, uploadedAtUtc, tenantId);
 }

@@ -75,7 +75,7 @@ flowchart LR
   uses it. Its bytes are stored under folders from `FileStorage:KeyTemplate`, in an object named after the id
   (see below), which stays internal.
 - **Bytes in storage, facts in the catalog.** `UploadFile` streams the request into `IFileStorageService`,
-  then records a `StoredFile` row plus one `StoredFileMetadata` row per pair (tenant, user) and saves
+  then records a `StoredFile` row, with the caller's tenant (`tenant_id`) and uploader (`created_by`), and saves
   through the unit of work. If the save fails, the uploaded bytes are deleted and the error rethrown, so
   storage never keeps unreferenced objects.
 - **Uploads stream, never buffer.** The upload endpoints take no `IFormFile` (binding one makes ASP.NET buffer the
@@ -121,12 +121,15 @@ flowchart LR
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
   and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
   didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
-  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the user is `anon`. The gateway passes
+  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the uploader is left empty. The gateway passes
   the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
   sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
   sets them from the token.
-- **Searchable metadata.** The list filters by user with `Metadata.Any(...)` sub-queries served by the
-  `(name, value)` index, plus content type and integrity problems, with GM.API paging (`X-Pagination` header).
+- **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
+  column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
+  filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
+  GM.FileStorage's name/value metadata table (`stored_file_metadata`) is still mapped but left empty: it's for
+  labels that vary from file to file, which this sample doesn't take.
 - **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
   `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
@@ -158,8 +161,8 @@ still tell which file an object belongs to.
   folders per category and no folder grows huge.
 - **`{id}{ext}` is the file's id plus its extension, cleaned up.** The sample picks the id first and hands it
   to the key strategy (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
-- **Nothing identifying.** Tenant, user and date stay out of the path. They're searchable metadata in
-  the catalog, which is how files are found.
+- **Nothing identifying.** Tenant, user and date stay out of the path. They're columns in the catalog,
+  which is how files are found.
 - **Other layouts are a config change.**
   - `{date:yyyy/MM}/{id}{ext}` gives date folders.
   - `{meta:tenantId}/{category}/{id}{ext}` gives per-tenant folders. Metadata values are cleaned
@@ -176,7 +179,7 @@ always queued for deletion in the `storage_cleanups` table.
 - **Upload** ([UploadFileCommand](GM.FileStorage.Sample.Application/Files/Commands/UploadFile/UploadFileCommand.cs)):
   1. Queue the new storage key for cleanup, due in 15 minutes, before any bytes exist.
   2. Upload the bytes.
-  3. In one transaction: create the row and its metadata rows, and drop the queued entry.
+  3. In one transaction: create the row and drop the queued entry.
 
   | If this happens… | …the result |
   | --- | --- |
@@ -225,7 +228,7 @@ because a direct link would serve ciphertext.
 | --- | --- | --- |
 | `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
 | `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
-| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, metadata and last integrity check included |
+| `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |

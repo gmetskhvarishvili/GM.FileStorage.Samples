@@ -87,7 +87,7 @@ flowchart TD
 ```
 
 The file belongs to the caller's tenant (`X-Tenant-Id`, else the shared `public` space), and only that tenant ever
-sees it. Without `X-User-Id` it is recorded as uploaded by `anon`.
+sees it. Without `X-User-Id` it has no uploader.
 
 To retry safely, send an `Idempotency-Key` header (a new GUID per upload) and resend it on every retry. A retry after
 a `200` gets the same `200` back, with `Idempotency-Replayed: true`, and nothing is stored again. A retry while the
@@ -154,7 +154,7 @@ flowchart TD
     guid -- no --> n404[404 no such route]
     guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
-    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>metadata, audit dates]
+    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>tenantId, uploadedBy, audit dates]
 ```
 
 ## Download — user flow
@@ -203,7 +203,7 @@ flowchart TD
     deleted -- yes --> bytes{Its bytes still in storage?}
     bytes -- no --> b404[404]
     bytes -- yes --> ok[204 No Content]
-    ok --> after([Back as it was:<br/>same content, same metadata])
+    ok --> after([Back as it was:<br/>same content, same record])
 ```
 
 ## Presign — user flow

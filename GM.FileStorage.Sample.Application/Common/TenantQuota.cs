@@ -28,7 +28,7 @@ public static class TenantQuota
     public static async Task<(long UsedBytes, int FileCount)> UsageAsync(IUnitOfWork unitOfWork, string tenantId, CancellationToken cancellationToken)
     {
         var files = unitOfWork.StoredFileRepository.Query(asNoTracking: true)
-            .Where(f => f.Metadata.Any(m => m.Name == StoredFileMetadataNames.TenantId && m.Value == tenantId));
+            .Where(f => f.TenantId == tenantId);
         var fileBytes = await files.SumAsync(f => (long?)f.Size, cancellationToken) ?? 0;
         var fileCount = await files.CountAsync(cancellationToken);
         return (fileBytes, fileCount);
