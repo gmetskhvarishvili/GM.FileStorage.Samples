@@ -61,7 +61,6 @@ public class StoredFileDetailsDto : AuditableDto
     public string? ContentType { get; set; }
     public long Size { get; set; }
     public string? Checksum { get; set; }
-    public bool IsPublic { get; set; }
     public DateTime UploadedAtUtc { get; set; }
     public string? TenantId { get; set; }
 

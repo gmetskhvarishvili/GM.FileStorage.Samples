@@ -103,7 +103,7 @@ erDiagram
         string content_type
         bigint size
         string checksum
-        bool is_public
+        bool is_public "GM.FileStorage column; uploads are private here"
         bool is_deleted "soft delete; bytes kept"
         uuid created_by "the uploader's X-User-Id"
     }
