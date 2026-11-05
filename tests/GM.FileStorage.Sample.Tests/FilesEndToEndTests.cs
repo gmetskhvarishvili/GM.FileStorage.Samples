@@ -85,6 +85,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 using var scope = _factory.Services.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var fileIds = await OurFiles(context).Select(x => x.Id).ToListAsync();
+                var eventIds = fileIds.Select(x => x.ToString()).ToList();
+                await context.DomainEvents.Where(x => x.AggregateType == nameof(StoredFile) && eventIds.Contains(x.AggregateId!)).ExecuteDeleteAsync();
                 await context.Set<StoredFile>().Where(x => fileIds.Contains(x.Id)).ExecuteDeleteAsync();
                 await context.Set<StorageCleanup>().Where(x => x.StorageKey.StartsWith(_tenantId)).ExecuteDeleteAsync();
             }
@@ -305,6 +307,48 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var whole = await client.GetAsync(url);
         Assert.Equal(HttpStatusCode.OK, whole.StatusCode);
         Assert.Contains("bytes", whole.Headers.AcceptRanges);
+    }
+
+    [Fact]
+    public async Task A_files_history_shows_who_opened_and_changed_it()
+    {
+        if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
+
+        using var client = Client(_factory);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("history-test/1.0");
+        var uploaded = await UploadAsync(client, Encoding.ASCII.GetBytes("%PDF-1.7 0123456789"), "history.pdf");
+        var url = $"/api/v1/files/{uploaded.Id}/content";
+
+        async Task GetRange(string range)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Range = RangeHeaderValue.Parse(range);
+            Assert.Equal(HttpStatusCode.PartialContent, (await client.SendAsync(request)).StatusCode);
+        }
+
+        // The whole file, then a player opening it from the start and seeking: the seek isn't another download.
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(url)).StatusCode);
+        await GetRange("bytes=0-3");
+        await GetRange("bytes=9-12");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
+
+        // Newest first, each with who did it; a deleted file's history stays readable. Deleting also hides and
+        // deactivates the file, in the same instant, so those three come in no particular order.
+        var history = await client.GetFromJsonAsync<List<HistoryEntryResponse>>($"/api/v1/files/{uploaded.Id}/history");
+        Assert.NotNull(history);
+        Assert.Equal(["Deactivated", "Deleted", "Hidden"], history.Take(3).Select(x => x.Action).Order());
+        Assert.Equal(["Downloaded", "Downloaded", "Uploaded"], history.Skip(3).Select(x => x.Action));
+        Assert.All(history, x => Assert.Equal(_userId, x.UserId?.ToString()));
+        Assert.All(history, x => Assert.Equal("history-test/1.0", x.UserAgent));
+        Assert.Equal(history.Select(x => x.OccurredAtUtc).OrderDescending(), history.Select(x => x.OccurredAtUtc));
+
+        Assert.Single((await client.GetFromJsonAsync<List<HistoryEntryResponse>>($"/api/v1/files/{uploaded.Id}/history?limit=1"))!);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/history?limit=0")).StatusCode);
+
+        // Another tenant gets nothing about it.
+        using var other = _factory.CreateClient();
+        other.DefaultRequestHeaders.Add("X-Tenant-Id", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{uploaded.Id}/history")).StatusCode);
     }
 
     [Theory]
@@ -735,6 +779,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
+
+    private sealed record HistoryEntryResponse(string Action, DateTime OccurredAtUtc, Guid? UserId, string? UserAgent);
 
     // Counts the request bytes the app reads, and notes how many it had read when the response started.
     private sealed class BodyReadCounter : IStartupFilter

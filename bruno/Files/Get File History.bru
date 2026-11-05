@@ -1,0 +1,36 @@
+meta {
+  name: Get File History
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{gateway}}/api/v1/files/{{fileId}}/history?limit=50
+  body: none
+  auth: none
+}
+
+params:query {
+  limit: 50
+}
+
+tests {
+  test("returns 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("lists what happened, newest first, with who did it", function () {
+    const actions = res.getBody().map(e => e.action);
+    expect(actions[0]).to.equal("Restored");
+    expect(actions[actions.length - 1]).to.equal("Uploaded");
+    expect(actions).to.include("Downloaded");
+    expect(actions).to.include("Deleted");
+    expect(res.getBody()[0].userId).to.be.a("string");
+  });
+}
+
+docs {
+  What happened to the file, newest first: uploaded, downloaded (the whole file, or a range from its first byte),
+  deleted, restored. Each entry has who did it: user, client and session from the sign-in, IP, user agent,
+  correlation id.
+}

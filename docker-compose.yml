@@ -7,6 +7,9 @@
 # talk plain HTTP on port 8080. The API applies its migrations on startup; the workers retry their job every minute,
 # so they cope with starting before the schema exists.
 #
+# The gateway requires sign-in: a GM.Identity bearer token, checked against the sessions in this Redis (point a
+# GM.Identity at it, or write a session as the README's "Running in Docker" shows).
+#
 # Redis makes the stack safe to scale out: the gateway's rate-limit counts, the API's per-client file count and the
 # workers' job lock all live there, shared by every instance. Two workers run to show it: only one cleans at a time.
 # Without Redis:ConnectionString (as with `dotnet run`) each service keeps them in memory, which suits one instance.
@@ -104,6 +107,7 @@ services:
     container_name: gm-filestorage-gateway
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # Rate-limit counts, and GM.Identity's sessions, where sign-in tokens are checked.
       Redis__ConnectionString: redis:6379
       ReverseProxy__Clusters__files-api__Destinations__primary__Address: http://api:8080/
     ports:

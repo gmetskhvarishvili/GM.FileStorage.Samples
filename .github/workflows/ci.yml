@@ -11,7 +11,17 @@ jobs:
 
     # A real PostgreSQL so the end-to-end (WAF) tests actually run instead of no-opping. The connection
     # string lives in appsecrets.json (gitignored), which the job creates from the committed template.
+    # Redis for the gateway's sign-in tests, which write GM.Identity sessions into it.
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
       postgres:
         image: postgres:16-alpine
         env:
@@ -45,6 +55,9 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build --verbosity normal
+        env:
+          GM_FILESTORAGE_TEST_REDIS: localhost:6379
+          GM_FILESTORAGE_TEST_REQUIRE_LIVE: "true"
 
   # The whole sample as docker-compose.yml runs it — images built from the Dockerfile — exercised through the gateway.
   compose:
@@ -64,18 +77,35 @@ jobs:
           done
           exit 1
 
+      # A session as GM.Identity writes it on sign-in, under the SHA-256 of the token, in the Redis the gateway reads.
+      - name: Sign in
+        run: |
+          token=ci-$(cat /proc/sys/kernel/random/uuid)
+          hash=$(printf %s "$token" | openssl dgst -sha256 -binary | base64)
+          session=$(jq -nc --arg u "$CI_USER" --arg s "$(cat /proc/sys/kernel/random/uuid)" \
+            '{userId: $u, sessionId: $s, expiresAt: "2099-01-01T00:00:00Z"}')
+          docker compose exec -T redis redis-cli SET "gm-identity:auth:session:$hash" "$session" EX 3600
+          echo "A=Authorization: Bearer $token" >> "$GITHUB_ENV"
+        env:
+          CI_USER: 5b0d9e2a-7c41-4f6e-8a3b-2d9c1e7f0a64
+
       - name: Upload, list and download through the gateway
         env:
           T: "X-Tenant-Id: 0c1f6a52-3b8e-4d7a-9f20-6e5b1c4d8a01"
         run: |
+          # Without signing in, nothing gets through.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$T" "http://localhost:8080/api/v1/files")" = 401
           printf '%%PDF-1.7 compose smoke test' > smoke.pdf
-          id=$(curl -sf -H "$T" -F "file=@smoke.pdf;type=application/pdf" "http://localhost:8080/api/v1/files" | jq -r .id)
+          id=$(curl -sf -H "$A" -H "$T" -F "file=@smoke.pdf;type=application/pdf" "http://localhost:8080/api/v1/files" | jq -r .id)
           echo "uploaded $id"
-          curl -sf -H "$T" "http://localhost:8080/api/v1/files" | jq -e --arg id "$id" 'map(.id) == [$id]'
-          curl -sf -H "$T" -o back.pdf "http://localhost:8080/api/v1/files/$id/content"
+          curl -sf -H "$A" -H "$T" "http://localhost:8080/api/v1/files" | jq -e --arg id "$id" 'map(.id) == [$id]'
+          curl -sf -H "$A" -H "$T" -o back.pdf "http://localhost:8080/api/v1/files/$id/content"
           cmp smoke.pdf back.pdf
+          # The download is in the file's history, as the signed-in user (the gateway set X-User-Id from the session).
+          curl -sf -H "$A" -H "$T" "http://localhost:8080/api/v1/files/$id/history" \
+            | jq -e 'map(.action) == ["Downloaded", "Uploaded"] and all(.userId == "5b0d9e2a-7c41-4f6e-8a3b-2d9c1e7f0a64")'
           # Another tenant can't see it.
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H "X-Tenant-Id: $(cat /proc/sys/kernel/random/uuid)" "http://localhost:8080/api/v1/files/$id/content")" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H "$A" -H "X-Tenant-Id: $(cat /proc/sys/kernel/random/uuid)" "http://localhost:8080/api/v1/files/$id/content")" = 404
           curl -sf http://localhost:8080/swagger/v1/swagger.json | jq -e '.paths | has("/api/v1/files/batch")'
 
       - name: The API and the workers share the storage volume and Redis

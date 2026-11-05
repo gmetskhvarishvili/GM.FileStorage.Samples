@@ -1,23 +1,25 @@
 headers {
+  Authorization: Bearer {{accessToken}}
   X-Tenant-Id: {{tenantId}}
-  X-User-Id: {{userId}}
   Accept-Language: {{acceptLanguage}}
   X-Correlation-Id: {{$guid}}
   Idempotency-Key: {{$guid}}
 }
 
 docs {
-  Settings (gateway and API addresses, tenant, user, page size, language) live in the Local environment —
-  select it before running. Every call goes through the gateway, as a client's would.
+  Settings (gateway and API addresses, GM.Identity's gateway and sign-in, tenant, page size, language) live in the
+  Local environment — select it before running. Every call goes through the gateway, as a client's would.
 
-  Every request sends the tenant and user as GM's actor headers (X-Tenant-Id, X-User-Id), so the files you upload
-  belong to that tenant and only it sees them. There's no sign-in yet: the gateway passes these headers through as
-  sent. Leave tenantId empty to work in the shared "public" space.
+  The gateway needs a GM.Identity sign-in: run Auth/Sign In first (with GM.Identity.Samples running). It saves
+  accessToken, which every request sends as a bearer token; the gateway sets the caller's user from it.
+
+  Every request also names the tenant (X-Tenant-Id), so the files you upload belong to that tenant and only it sees
+  them. A session bound to another tenant gets 403. Leave tenantId empty to work in the shared "public" space.
 
   Every request also sends a fresh X-Correlation-Id and Idempotency-Key; Files/Upload File Again reuses Upload
   File's key to show a retry being replayed.
 
   Run Files in order: Upload File saves fileId, which the later requests use. The files uploaded are in sample-files/.
 
-  Values the scripts save (fileId, retryKey) go into the Local environment as unsaved, in-memory values.
+  Values the scripts save (accessToken, fileId, retryKey) go into the Local environment as unsaved, in-memory values.
 }
