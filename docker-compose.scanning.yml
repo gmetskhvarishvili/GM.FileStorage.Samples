@@ -1,0 +1,36 @@
+# Malware scanning on, with ClamAV, on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scanning.yml up -d --build
+#
+# Every upload is then scanned as it streams in; an infected one is refused (400) and nothing is kept, and while ClamAV
+# can't answer, uploads are refused unscanned (503). The workers rescan files during their integrity check.
+#
+# ClamAV downloads its signatures on first start (a minute or two) and needs about 1.5 GB of RAM; the API and workers
+# wait until it's healthy. It updates the signatures itself afterwards.
+
+services:
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: gm-filestorage-clamav
+    healthcheck:
+      test: [ "CMD", "clamdcheck.sh" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  api:
+    environment:
+      FileStorage__MalwareScanner__Enabled: "true"
+      FileStorage__MalwareScanner__ClamAV__Host: clamav
+    depends_on:
+      clamav:
+        condition: service_healthy
+
+  worker:
+    environment:
+      FileStorage__MalwareScanner__Enabled: "true"
+      FileStorage__MalwareScanner__ClamAV__Host: clamav
+    depends_on:
+      clamav:
+        condition: service_healthy

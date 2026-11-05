@@ -567,6 +567,36 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task With_malware_scanning_on_and_no_scanner_uploads_are_refused_unscanned()
+    {
+        if (!_infraReady) return;
+
+        // Scanning switched on (FileStorage:MalwareScanner:Enabled) with ClamAV nowhere to be found: nothing gets through
+        // unscanned.
+        var nobody = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        nobody.Start();
+        var port = ((IPEndPoint)nobody.LocalEndpoint).Port;
+        nobody.Stop();
+        await using var factory = new GmWebApplicationFactory<Program>()
+            .WithConfig("FileStorage:Local:RootPath", _root)
+            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "true")
+            .WithConfig("FileStorage:MalwareScanner:ClamAV:Host", "127.0.0.1")
+            .WithConfig("FileStorage:MalwareScanner:ClamAV:Port", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        using var client = Client(factory);
+
+        var refused = await SendFileAsync(client, HttpMethod.Post, "/api/v1/files", Encoding.UTF8.GetBytes("%PDF-1.7 unscanned"), "a.pdf", "application/pdf");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        Assert.True(refused.Headers.Contains("Retry-After"));
+        Assert.Empty(await ListAsync(client, ""));
+        Assert.Empty(StoredObjects());
+        Assert.Empty(await CleanupEntriesAsync());
+        // Readiness says so too, so an orchestrator stops sending uploads here.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+    }
+
+    [Fact]
     public async Task Large_uploads_are_streamed_into_storage_intact()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable

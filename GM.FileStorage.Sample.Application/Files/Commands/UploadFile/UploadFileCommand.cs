@@ -6,6 +6,7 @@ using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.Stor
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
+using GM.FileStorage.MalwareScanner;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
@@ -96,7 +97,8 @@ public class UploadFileCommandHandler(
                 },
                 cancellationToken);
         }
-        catch (Exception ex) when (ex is FileTooLargeException or FileContentTypeNotAllowedException or FileContentTypeMismatchException)
+        catch (Exception ex) when (ex is FileTooLargeException or FileContentTypeNotAllowedException or FileContentTypeMismatchException
+                                       or FileMalwareDetectedException)
         {
             await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
             throw new BadRequestException(ex.Message);

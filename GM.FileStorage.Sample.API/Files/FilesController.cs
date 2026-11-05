@@ -41,6 +41,7 @@ namespace GM.FileStorage.Sample.API.Files;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}")]
 [TooManyUploads]
+[ScanUnavailable]
 public class FilesController(UploadQuota quota) : BaseController
 {
     /// <summary>
