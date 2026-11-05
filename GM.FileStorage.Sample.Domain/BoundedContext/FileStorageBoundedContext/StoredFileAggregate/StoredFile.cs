@@ -1,5 +1,6 @@
 using GM.EntityFramework.Domain.Abstractions;
 using GM.FileStorage.Domain.FileStorage.StoredFileAggregate.Entities;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Events;
 using System;
 
 namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
@@ -63,6 +64,9 @@ public class StoredFile : GMStoredFile<StoredFile>, IAggregateRoot
         base.RestoreAll();
         DeletedAtUtc = null;
     }
+
+    /// <summary>Records that someone opened the file's content (<see cref="StoredFileDownloadedDomainEvent"/>).</summary>
+    public void RecordDownload() => RaiseDomainEvent(new StoredFileDownloadedDomainEvent(Id));
 
     /// <summary>Records a check of the stored bytes: when, and what was wrong (null when they matched).</summary>
     public void RecordVerification(DateTime verifiedAtUtc, string? problem)

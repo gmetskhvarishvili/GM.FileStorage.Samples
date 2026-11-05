@@ -16,6 +16,8 @@ namespace GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 /// <summary>
 /// Opens a catalogued file's content for streaming. The catalog decides whether the file exists (a deleted row is
 /// not downloadable); the bytes come straight from <see cref="IFileStorageService"/>, never buffered whole.
+/// Each download is recorded in the file's history, with who opened it: the whole file, or a range from its first
+/// byte. Later ranges (a video player seeking, a download resuming) aren't, so one viewing is one entry.
 /// </summary>
 public class DownloadFileQuery : IRequest<FileContentDto>
 {
@@ -48,7 +50,7 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
                                       && x.IsActive
                                       && !x.IsDeleted
                                       && !x.IsHidden,
-                true,
+                false,
                 null,
                 cancellationToken);
 
@@ -77,6 +79,20 @@ public class DownloadFileQueryHandler(IUnitOfWork unitOfWork, IFileStorageServic
                 StringResource.File,
                 StringResource.Id,
                 request.Id);
+        }
+
+        if (download.Range is not { Offset: > 0 })
+        {
+            entity.RecordDownload();
+            try
+            {
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch
+            {
+                await download.DisposeAsync();
+                throw;
+            }
         }
 
         // The caller owns the stream (the API hands it to a FileStreamResult, which disposes it).

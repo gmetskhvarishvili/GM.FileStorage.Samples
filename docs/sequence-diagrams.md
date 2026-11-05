@@ -65,11 +65,22 @@ sequenceDiagram
     autonumber
     actor C as Client
     participant G as Gateway
-    participant RL as Rate-limit store<br/>(GM.Caching, in memory)
+    participant ID as GM.Identity sessions<br/>(Redis)
+    participant RL as Rate-limit store<br/>(GM.Caching)
     participant API
 
-    C->>G: request
+    C->>G: request (Authorization: Bearer token)
     G->>G: match a route → policy (uploads or api), partition by IP
+    opt a file route (sign-in on)
+        G->>ID: GET gm-identity:auth:session:{sha256(token)}
+        alt no token, unknown or expired
+            G-->>C: 401
+        else X-Tenant-Id names another tenant than the session's
+            G-->>C: 403
+        else live session
+            G->>G: drop the client's X-User-Id, X-Tenant-Id, …<br/>set them from the session
+        end
+    end
     G->>RL: count this request in the sliding window
     alt over the limit
         RL-->>G: denied, retry after N s
@@ -267,11 +278,39 @@ sequenceDiagram
         API-->>C: 416 + Content-Range: bytes */size
     else range
         S-->>API: stream of just that range
+        opt from the first byte
+            API->>DB: INSERT StoredFileDownloadedDomainEvent<br/>(with the caller's identity)
+        end
         API-->>C: 206 + Content-Range + Accept-Ranges (streamed)
     else whole file
         S-->>API: stream
+        API->>DB: INSERT StoredFileDownloadedDomainEvent<br/>(with the caller's identity)
         API-->>C: 200 + Accept-Ranges (streamed)
     end
+```
+
+## History — sequence
+
+`GET /api/v1/files/{id}/history?limit=50`
+
+```mermaid
+---
+title: History — sequence
+---
+sequenceDiagram
+    autonumber
+    actor C as Client
+    participant API
+    participant DB
+
+    C->>API: GET …/history?limit=50
+    API->>DB: is it a file of the caller's tenant? (deleted ones too)
+    alt no
+        API-->>C: 404
+    end
+    API->>DB: domain_events WHERE aggregate = StoredFile/{id}<br/>ORDER BY occurred_on DESC LIMIT 50
+    DB-->>API: Uploaded, Downloaded, Deleted, Restored, … + who
+    API-->>C: 200 [ { action, occurredAtUtc, userId, clientId, sessionId, ipAddress, userAgent, correlationId } ]
 ```
 
 ## Delete — sequence

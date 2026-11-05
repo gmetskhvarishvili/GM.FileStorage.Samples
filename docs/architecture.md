@@ -21,10 +21,13 @@ flowchart LR
     client([Client / Swagger UI])
 
     subgraph edge[Gateway.API]
+        auth[Sign-in<br/>GM.Identity bearer token]
         rl[Rate limiting<br/>uploads 30/min · api 300/min per IP]
-        proxy[YARP reverse proxy]
-        rl --> proxy
+        proxy[YARP reverse proxy<br/>+ caller's X-User-Id, X-Tenant-Id, …]
+        auth --> rl --> proxy
     end
+
+    sessions[(GM.Identity sessions<br/>Redis)]
 
     subgraph api[Files API]
         ctrl[FilesController] --> med[GM.Mediator<br/>commands & queries]
@@ -39,7 +42,8 @@ flowchart LR
     db[(PostgreSQL<br/>file_storage.*)]
     store[(Storage<br/>Local · S3 · Azure Blob)]
 
-    client -->|HTTPS| rl
+    client -->|HTTPS + Bearer token| auth
+    auth -.->|look up the token| sessions
     proxy -->|/api/v1/files/**<br/>/swagger/**| ctrl
     uow --> db
     fs --> store
@@ -48,6 +52,8 @@ flowchart LR
 ```
 
 - **Clients only talk to the gateway.** It forwards `/api/{version}/files/**` and `/swagger/**` to the API.
+  The file routes need a GM.Identity sign-in: the gateway looks the token up in GM.Identity's session store and
+  tells the API who the caller is (`X-User-Id`, `X-Tenant-Id`, …), replacing whatever the client sent.
   Bodies are streamed through, never buffered, so large uploads and `Range` downloads pass unchanged.
 - **The API holds no background work.** It serves requests and applies migrations at startup.
 - **The worker holds no HTTP surface.** It reads the `storage_cleanups` queue and deletes the bytes that

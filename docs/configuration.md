@@ -35,8 +35,9 @@ flowchart LR
 | Setting | Gateway | API | Worker | Where |
 | --- | :-: | :-: | :-: | --- |
 | `ReverseProxy:*` (routes, cluster address) | ✓ | | | appsettings.json |
+| `Authentication:Enabled` (on: the file routes need a GM.Identity token; off: actor headers pass through as sent) | ✓ | | | appsettings.json |
 | `RateLimiting:Policies:*`: the gateway's per-request limits, the API's `uploaded-files` (30 files a minute per client) | ✓ | ✓ | | appsettings.json |
-| `Redis:ConnectionString` (share limits, counts, idempotency keys and the job lock across instances; unset: in memory) | ✓ | ✓ | ✓ | environment / appsecrets.json |
+| `Redis:ConnectionString` (share limits, counts, idempotency keys and the job lock across instances; unset: in memory). The gateway needs it while sign-in is on: it's GM.Identity's session store, where tokens are checked (`localhost:6379` in Development) | ✓ | ✓ | ✓ | environment / appsecrets.json / appsettings.Development.json (gateway) |
 | `Idempotency:LockExpiry` (10 minutes: how long a request holds its `Idempotency-Key`, longer than an upload takes) | | ✓ | | appsettings.json |
 | `Kestrel:Limits:MaxRequestBodySize` (60 MB) | ✓ | ✓ | | appsettings.json |
 | `ConnectionStrings:ApplicationDatabase` | | ✓ | ✓ | appsecrets.json |
@@ -62,14 +63,22 @@ no secrets.
 
 ## Gateway
 
-Routes are matched in order of specificity; each names a rate-limit policy and the partition (`Ip`).
+Routes are matched in order of specificity; each names a rate-limit policy and the partition (`Ip`), and the file
+routes need sign-in (`AuthorizationPolicy: default`).
 
-| Route | Match | Policy |
-| --- | --- | --- |
-| `files-upload` | `POST /api/{version}/files` | `uploads` |
-| `files-batch-upload` | `POST /api/{version}/files/batch` | `uploads` |
-| `files` | `/api/{version}/files/{**catch-all}` | `api` |
-| `files-api-docs` | `GET /swagger/{**catch-all}` | none |
+| Route | Match | Policy | Sign-in |
+| --- | --- | --- | --- |
+| `files-upload` | `POST /api/{version}/files` | `uploads` | ✓ |
+| `files-batch-upload` | `POST /api/{version}/files/batch` | `uploads` | ✓ |
+| `files` | `/api/{version}/files/{**catch-all}` | `api` | ✓ |
+| `files-api-docs` | `GET /swagger/{**catch-all}` | none | |
+
+Sign-in takes a GM.Identity bearer token, looked up in GM.Identity's session store (Redis, under
+`gm-identity:auth:session:` and the token's SHA-256). No token, or an unknown or expired one, is `401`; a session
+bound to a tenant that names another in `X-Tenant-Id` is `403`. The gateway then sets `X-User-Id`, `X-Client-Id`,
+`X-Session-Id` and `X-Tenant-Id` from the session, after removing any the client sent, and forwards the client's user
+agent as `X-Forwarded-User-Agent`. With `Authentication:Enabled=false` nothing is checked and the actor headers pass
+through as sent.
 
 | Policy | Algorithm | Limit |
 | --- | --- | --- |

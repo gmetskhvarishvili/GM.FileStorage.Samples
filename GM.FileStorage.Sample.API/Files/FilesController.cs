@@ -10,6 +10,7 @@ using GM.FileStorage.Sample.Application.Files.Commands.UploadFile;
 using GM.FileStorage.Sample.Application.Files.Commands.UploadFiles;
 using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
+using GM.FileStorage.Sample.Application.Files.Queries.GetFileHistory;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFilesList;
 using GM.FileStorage.Sample.Application.Files.Queries.GetTenantUsage;
 using Mapster;
@@ -24,14 +25,15 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
-/// Files Controller — upload (one file or a batch), list, inspect, download, delete and restore files. A
+/// Files Controller — upload (one file or a batch), list, inspect, download, delete and restore files, and see who
+/// did what to one. A
 /// file's content never changes after upload; new content is a new file. A file is
 /// identified by one GUID (its id), and that is all callers see of it: its bytes are stored in the storage provider
 /// behind <c>IFileStorageService</c>, under a folder path from <c>FileStorage:KeyTemplate</c> built on the id; every upload is also recorded in the catalog (a stored-file row plus its
 /// searchable metadata), which is what the list and details endpoints read.
 /// <para>
-/// Every file belongs to the caller's tenant, taken from <c>X-Tenant-Id</c> (GM's actor headers, a token claim once
-/// sign-in is added), and another tenant's file answers 404. Without the header, the caller works in a shared space
+/// Every file belongs to the caller's tenant, taken from <c>X-Tenant-Id</c> (GM's actor headers, which the gateway
+/// sets from the caller's GM.Identity token), and another tenant's file answers 404. Without the header, the caller works in a shared space
 /// (<c>public</c>) that no tenant sees into.
 /// </para>
 /// </summary>
@@ -187,6 +189,29 @@ public class FilesController(UploadQuota quota) : BaseController
         var response = await Mediator.Send(new GetFileDetailsQuery { Id = id, Visibility = request.Visibility }, cancellationToken);
         var result = response.Adapt<StoredFileDetailsModel>();
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Get File History
+    /// </summary>
+    /// <remarks>
+    /// What happened to the file, newest first: uploaded, downloaded, deleted, restored, each with who did it (user,
+    /// client, session, IP, user agent, correlation id). A download is recorded when the whole file, or a range from
+    /// its first byte, is opened; later ranges (seeking, resuming) aren't. A deleted file's history stays readable.
+    /// </remarks>
+    /// <param name="id">The file's id</param>
+    /// <param name="limit">At most this many entries, the newest (1 to 100, default 50)</param>
+    /// <param name="cancellationToken"></param>
+    [HttpGet("files/{id:guid}/history", Name = nameof(GetFileHistory))]
+    [ProducesResponseType(typeof(IEnumerable<FileHistoryEntryModel>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetFileHistory(
+        [FromRoute] Guid id,
+        [FromQuery] int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await Mediator.Send(new GetFileHistoryQuery { Id = id, Limit = limit }, cancellationToken);
+        return Ok(response.Adapt<List<FileHistoryEntryModel>>());
     }
 
     /// <summary>

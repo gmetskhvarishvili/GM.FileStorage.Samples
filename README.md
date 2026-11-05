@@ -32,7 +32,8 @@ The layout mirrors [GM.Identity.Samples](https://github.com/gmetskhvarishvili/GM
 title: System overview — flowchart
 ---
 flowchart LR
-    client([Client]) --> gw[Gateway.API<br/>:7141 · rate limits]
+    client([Client]) --> gw[Gateway.API<br/>:7141 · sign-in, rate limits]
+    gw -. token lookup .-> identity[(GM.Identity<br/>sessions in Redis)]
     gw --> api[Files API<br/>:7140]
     api --> db[(PostgreSQL)]
     api --> store[(Storage)]
@@ -118,21 +119,31 @@ flowchart LR
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details and
   download; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
+- **Sign-in through GM.Identity.** The gateway takes a GM.Identity bearer token on every file route and looks it up
+  in GM.Identity's session store (its Redis): no token or an unknown or expired one is `401`. It then sets the
+  caller's `X-User-Id`, `X-Client-Id`, `X-Session-Id` and `X-Tenant-Id` from the session for the API
+  (`AddGMActorForwarding()`), dropping any copies the client sent, so they can't be spoofed; the API trusts them
+  because only the gateway reaches it. A session bound to a tenant always works in it (naming another in
+  `X-Tenant-Id` is `403`); one without a tenant may name one, or work in the shared space. Health and the API docs
+  stay open. `Authentication:Enabled=false` turns sign-in off, for local development without GM.Identity.
+- **Who opened what.** Every download is recorded with who did it (user, client, session, IP, user agent,
+  correlation id), next to the upload, delete and restore. `GET /api/v1/files/{id}/history` lists them, newest first.
+  A range from the file's first byte counts as a download; later ranges (a player seeking, a download resuming)
+  don't, so one viewing is one entry.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
   and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
   didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
-  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the uploader is left empty. The gateway passes
-  the headers through as sent, since there is no sign-in yet: that makes it a demo, not a security boundary. With
-  sign-in, the gateway adds `AddGMActorForwarding()` (as GM.Identity's does), which drops the client's copies and
-  sets them from the token.
+  tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the uploader is left empty. Through
+  the gateway, they come from the caller's sign-in (above).
 - **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
   column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
   filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
   There's no metadata table: GM.FileStorage's name/value metadata (`GMStoredFile<TStoredFile, TStoredFileMetadata>`)
   is for labels that vary from file to file, which this sample doesn't take.
-- **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s are written to
-  `domain_events.domain_events` in the same transaction and dispatched in-process after the save.
+- **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s, and the sample's
+  `StoredFileDownloadedDomainEvent`, are written to `domain_events.domain_events` in the same transaction, with the
+  caller's identity, and dispatched in-process after the save. The file history reads them back.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
   active, so switching disk → S3 → Azure is a **config change, not a code change**. The cloud clients are
   only constructed when their provider is selected.
@@ -230,14 +241,16 @@ they're uploaded again.
 | `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
-| `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206) |
+| `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206); recorded in its history |
+| `GET` | `/api/v1/files/{id}/history?limit=` | What happened to the file, newest first, and who did it (uploaded, downloaded, deleted, restored); 50 by default, at most 100 |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
 | `GET` | `/` | Swagger UI |
 
-`/api/v1` calls may carry `X-Tenant-Id` (a GUID) and `X-User-Id`; without a tenant they work in the shared
-`public` space. The links under `/files` are signed instead. Through the gateway, the same routes are on `https://localhost:7141`. Uploads are limited to
+Through the gateway, on `https://localhost:7141`, the same routes need a GM.Identity bearer token (`Authorization:
+Bearer …`), and may name a tenant in `X-Tenant-Id` (a GUID); without one they work in the shared `public` space.
+Called directly, the API takes the actor headers (`X-Tenant-Id`, `X-User-Id`) as sent. Uploads are limited to
 30 per minute per IP, everything else to 300; over the limit you get `429` with `Retry-After`.
 
 ## Database setup
@@ -295,21 +308,37 @@ dotnet run --project GM.FileStorage.Sample.Worker       # storage cleanup, every
 dotnet run --project GM.FileStorage.Sample.Gateway.API  # https://localhost:7141, Swagger UI at /
 ```
 
+The gateway needs a GM.Identity sign-in. Run [GM.Identity.Samples](https://github.com/gmetskhvarishvili/GM.Identity.Samples)
+(its gateway on `https://localhost:7225`, its sessions in Redis on `localhost:6379`, which this gateway reads too, as
+`appsettings.Development.json` sets), and sign in as its seeded admin:
+
+```bash
+TOKEN=$(curl -sk https://localhost:7225/connect/token -d grant_type=password -d username=admin@local \
+  -d 'password=Admin123!' -d client_id=11111111-1111-1111-1111-111111111111 -d client_secret=secret \
+  | jq -r '.accessToken // .access_token')
+```
+
+Without GM.Identity, start the gateway with sign-in off instead (`Authentication__Enabled=false`): it then passes
+`X-Tenant-Id` / `X-User-Id` through as sent, which only suits local development.
+
 Then call the gateway, as a tenant (any GUID; leave `-H "$T"` out to use the shared space):
 
 ```bash
+A="Authorization: Bearer $TOKEN"
 T="X-Tenant-Id: 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71"
 
-curl -H "$T" -F "file=@passport.pdf" "https://localhost:7141/api/v1/files"
+curl -H "$A" -H "$T" -F "file=@passport.pdf" "https://localhost:7141/api/v1/files"
 # { "id": "6f1e…-…", "fileName": "passport.pdf", "contentType": "application/pdf", "size": 12345, … }
 
-curl -H "$T" -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch"
+curl -H "$A" -H "$T" -F "files=@visa.pdf" -F "files=@contract.docx" "https://localhost:7141/api/v1/files/batch"
 # [ { "fileName": "visa.pdf", "succeeded": true, "file": { "id": "…", … } }, { "fileName": "contract.docx", … } ]
 
-curl -H "$T" "https://localhost:7141/api/v1/files"
-curl -H "$T" -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
-curl -H "$T" -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
-curl -H "$T" -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
+curl -H "$A" -H "$T" "https://localhost:7141/api/v1/files"
+curl -H "$A" -H "$T" -o passport.pdf "https://localhost:7141/api/v1/files/6f1e…/content"
+curl -H "$A" -H "$T" "https://localhost:7141/api/v1/files/6f1e…/history"
+# [ { "action": "Downloaded", "occurredAtUtc": "…", "userId": "…", "ipAddress": "…", "userAgent": "curl/8.9.1", … }, { "action": "Uploaded", … } ]
+curl -H "$A" -H "$T" -X DELETE "https://localhost:7141/api/v1/files/6f1e…"
+curl -H "$A" -H "$T" -X POST "https://localhost:7141/api/v1/files/6f1e…/restore"
 ```
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
@@ -327,15 +356,16 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 ## Trying it with Bruno
 
 [`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, through the gateway. Open the
-folder in Bruno, pick the **Local** environment (gateway, API, tenant and user), and run **Files** in order: Upload
-File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key` (replayed), sends a batch
-and a refused type, then lists, reads, downloads a range, checks usage, tries the file as another tenant (404),
-deletes and restores. **Health** checks both services. Every request has tests, so the whole run doubles as a smoke
-test:
+folder in Bruno, pick the **Local** environment (gateway, GM.Identity's gateway and sign-in, tenant), and run **Auth**
+first: Sign In gets a token from GM.Identity (running, as above), which every other request sends. Then run **Files**
+in order: Upload File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key`
+(replayed), sends a batch and a refused type, then lists, reads, downloads a range, checks usage, tries the file as
+another tenant (404), deletes, restores, and reads the file's history. **Health** checks both services. Every request
+has tests, so the whole run doubles as a smoke test:
 
 ```bash
 cd bruno
-npx @usebruno/cli run Files Health --env Local --insecure   # --insecure: the local dev certificate
+npx @usebruno/cli run Auth Files Health --env Local --insecure   # --insecure: the local dev certificate
 ```
 
 ## Running in Docker
@@ -354,6 +384,17 @@ connection string comes from environment variables in the compose file instead o
 worker share the `gm-filestorage-files` volume as their storage root. `docker compose down -v` removes everything,
 volumes included.
 
+The gateway checks sign-in tokens in compose's Redis. Point a GM.Identity at that Redis to sign in for real, or write a
+session there the way GM.Identity does, under the SHA-256 of the token (as CI does):
+
+```bash
+TOKEN=demo-$(uuidgen)
+HASH=$(printf %s "$TOKEN" | openssl dgst -sha256 -binary | base64)
+docker compose exec -T redis redis-cli SET "gm-identity:auth:session:$HASH" \
+  '{"userId":"8d1e4c27-0b6a-4f3e-9c52-7a1f0e6b3d94","sessionId":"0f8c2b1a-6d3e-4c5f-9a7b-1e2d3c4b5a69","expiresAt":"2099-01-01T00:00:00Z"}' EX 3600
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/files
+```
+
 ## Testing
 
 ```bash
@@ -367,7 +408,8 @@ per file, a refused file not stopping the rest), the single endpoint refusing se
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
 the upload rules, the cleanup job, integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
-per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once, and
+per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once,
+a file's history recording who downloaded, deleted and restored it (and not a player's seeks), and
 `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
@@ -375,10 +417,15 @@ per-client file count refusing a batch whole, one tenant never seeing or touchin
 `GatewayTests` (`tests/GM.FileStorage.Sample.Gateway.Tests`) run the gateway as configured in its appsettings.json in
 front of a stub API on a real port: which requests are forwarded (bodies and `Range` included) and which aren't,
 the 30-a-minute upload limit with `429` + `Retry-After` while reads keep their own limit, readiness following the
-API, and Swagger UI served by the gateway itself. They need nothing running.
+API, and Swagger UI served by the gateway itself, with sign-in off. They need nothing running. `GatewaySignInTests`
+turn sign-in on and write GM.Identity sessions into a Redis (`GM_FILESTORAGE_TEST_REDIS`, host:port; they pass without
+running when it isn't set, and CI sets it): no token, an unknown or an expired one is `401`; the signed-in caller
+reaches the API with spoofed headers replaced; a session naming another tenant is `403`; and sign-in without Redis
+refuses to start.
 
-CI also builds the Docker images and runs `docker compose up`, then uploads, lists and downloads a file through the
-gateway and checks the API and worker share the storage volume.
+CI also builds the Docker images and runs `docker compose up`, signs in with a session written to compose's Redis,
+then uploads, lists and downloads a file through the gateway, reads its history, and checks the API and worker
+share the storage volume.
 
 ## License
 
