@@ -109,6 +109,12 @@ flowchart LR
   on) and checks them against the catalog: missing bytes, a wrong size or a checksum mismatch is recorded on the file
   as `integrityProblem` (with `verifiedAtUtc`), shown in details and the list, which filters on
   `integrityProblem=true`. A file recorded without a checksum gets one here.
+- **Malware scanning, when you switch it on.** With `FileStorage:MalwareScanner:Enabled` (off by default), every
+  upload is scanned by [ClamAV](https://www.clamav.net) as it streams into storage, before it's encrypted
+  ([GM.FileStorage.MalwareScanner](https://www.nuget.org/packages/GM.FileStorage.MalwareScanner)). An infected file gets a `400` naming
+  what was found, and nothing is kept. While ClamAV can't answer, uploads are refused unscanned with `503` and
+  `Retry-After`, and readiness reports it. The integrity check rescans files too, so one matching a signature added
+  after its upload is flagged. ClamAV is free; it needs about 1.5 GB of RAM. See [Running in Docker](#running-in-docker).
 - **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
   `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
 - **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged.
@@ -394,6 +400,16 @@ docker compose exec -T redis redis-cli SET "gm-identity:auth:session:$HASH" \
   '{"userId":"8d1e4c27-0b6a-4f3e-9c52-7a1f0e6b3d94","sessionId":"0f8c2b1a-6d3e-4c5f-9a7b-1e2d3c4b5a69","expiresAt":"2099-01-01T00:00:00Z"}' EX 3600
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/files
 ```
+
+To scan uploads for malware, add the ClamAV override. It runs ClamAV next to the stack and switches scanning on for
+the API and the workers; the first start takes a minute or two while ClamAV downloads its signatures:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scanning.yml up -d --build
+```
+
+Outside Docker, run ClamAV yourself and set `FileStorage:MalwareScanner:Enabled` to `true` (and
+`FileStorage:MalwareScanner:ClamAV:Host` / `Port` if it isn't on `localhost:3310`) for the API and the worker.
 
 ## Testing
 

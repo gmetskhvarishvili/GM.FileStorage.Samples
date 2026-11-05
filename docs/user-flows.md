@@ -85,7 +85,10 @@ flowchart TD
     valid -- no --> v400[400 validation errors]
     valid -- yes --> rules{Upload rules pass?<br/>allowed type · bytes match type ·<br/>size, checked as it streams}
     rules -- no --> r400[400 with the reason<br/>cut off at once, nothing kept]
-    rules -- yes --> stored[Bytes stored at<br/>category/shard/id.ext]
+    rules -- yes --> scan{No malware?<br/>when scanning is on}
+    scan -- "no: malware found" --> m400[400 naming it<br/>nothing kept]
+    scan -- "no answer: ClamAV down" --> s503[503 + Retry-After<br/>nothing kept]
+    scan -- "yes, or scanning off" --> stored[Bytes stored, encrypted,<br/>at shard/id]
     stored --> saved{Catalog saved?}
     saved -- no --> e500[500<br/>bytes deleted or queued]
     saved -- yes --> more{Another file part<br/>after it?}
@@ -93,6 +96,9 @@ flowchart TD
     more -- no --> ok[200 id, fileName,<br/>contentType, size, checksum]
     ok --> next([Keep the id: every other call uses it])
 ```
+
+With malware scanning on (`FileStorage:MalwareScanner:Enabled`), the file is scanned by ClamAV while it streams in, so the scan
+adds no extra pass. A batch reports a scanning refusal on the file it applies to.
 
 The file belongs to the caller's tenant (`X-Tenant-Id`, else the shared `public` space), and only that tenant ever
 sees it. Without `X-User-Id` it has no uploader.

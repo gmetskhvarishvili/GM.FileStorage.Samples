@@ -46,6 +46,7 @@ flowchart LR
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
 | `FileStorage:Encryption:Enabled` (on), `ActiveKeyId` and `Keys` (the master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsettings.json (on) / appsecrets.json (keys) |
 | `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
+| `FileStorage:MalwareScanner:Enabled` (off; on, uploads are scanned and the integrity check rescans), `FileStorage:MalwareScanner:ClamAV:Host` / `Port` (`localhost:3310`) | | ✓ | ✓ | appsettings.json, or the environment (docker-compose.scanning.yml) |
 | `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
 | `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
 

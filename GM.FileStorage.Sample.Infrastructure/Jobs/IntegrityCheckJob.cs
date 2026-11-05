@@ -1,4 +1,5 @@
 using GM.FileStorage.Encryption;
+using GM.FileStorage.MalwareScanner;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Scheduling;
@@ -25,7 +26,8 @@ public class IntegrityOptions
 /// <summary>
 /// Reads stored files back and checks them against the catalog: the bytes exist, have the recorded size, and hash to
 /// the recorded checksum (decrypted first when encryption at rest is on, as the checksum is the plaintext's). A file
-/// stored without a checksum (recorded before checksums were kept) gets one recorded. What's
+/// stored without a checksum (recorded before checksums were kept) gets one recorded. With malware scanning on, the
+/// bytes are rescanned too, so a file matching a signature added since its upload is flagged. What's
 /// found is kept on the file (<see cref="StoredFile.VerifiedAtUtc"/>, <see cref="StoredFile.IntegrityProblem"/>),
 /// so problems show in the files list and details. Deleted files are checked too: their bytes are kept for a restore.
 /// </summary>
@@ -63,6 +65,7 @@ public sealed class IntegrityCheckJob(
             await using var scope = scopeFactory.CreateAsyncScope();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
             var storage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
+            var scanner = scope.ServiceProvider.GetRequiredService<IMalwareScanner>();
 
             var file = await unitOfWork.StoredFileRepository.FirstOrDefaultAsync(x => x.Id == id, false, null, cancellationToken);
             if (file == null)
@@ -71,7 +74,7 @@ public sealed class IntegrityCheckJob(
             string? problem;
             try
             {
-                problem = await CheckAsync(storage, file, cancellationToken);
+                problem = await CheckAsync(storage, scanner, file, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -99,8 +102,10 @@ public sealed class IntegrityCheckJob(
             : JobExecutionResult.Partial(checkedFiles, failures, message);
     }
 
-    // Null when the stored bytes match the record; otherwise what's wrong. A missing checksum is recorded.
-    private static async Task<string?> CheckAsync(IFileStorageService storage, StoredFile file, CancellationToken cancellationToken)
+    // Null when the stored bytes match the record and carry no malware; otherwise what's wrong. A missing checksum is
+    // recorded. A scanner that can't answer doesn't fail the check: the bytes are still checked, just not rescanned.
+    private async Task<string?> CheckAsync(
+        IFileStorageService storage, IMalwareScanner scanner, StoredFile file, CancellationToken cancellationToken)
     {
         FileDownloadResult download;
         try
@@ -114,6 +119,8 @@ public sealed class IntegrityCheckJob(
 
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long size = 0;
+        var scan = await BeginScanAsync(scanner, file, cancellationToken);
+        MalwareScanResult? verdict = null;
         await using (download)
         {
             var buffer = new byte[81920];
@@ -124,13 +131,26 @@ public sealed class IntegrityCheckJob(
                 {
                     sha.AppendData(buffer, 0, read);
                     size += read;
+                    if (scan is not null && !await WriteToScanAsync(scan, buffer.AsMemory(0, read), file, cancellationToken))
+                        scan = null;
                 }
+
+                if (scan is not null)
+                    verdict = await CompleteScanAsync(scan, file, cancellationToken);
             }
             catch (FileDecryptionException)
             {
                 return "The stored bytes fail decryption: they were altered or truncated.";
             }
+            finally
+            {
+                if (scan is not null)
+                    await scan.DisposeAsync();
+            }
         }
+
+        if (verdict is { IsInfected: true })
+            return $"Malware was found in the stored bytes ({verdict.Threat}).";
 
         if (size != file.Size)
             return $"The stored bytes are {size} bytes, not the {file.Size} recorded.";
@@ -145,5 +165,46 @@ public sealed class IntegrityCheckJob(
         return string.Equals(file.Checksum, checksum, StringComparison.OrdinalIgnoreCase)
             ? null
             : "The stored bytes don't match the recorded checksum.";
+    }
+
+    private async Task<IMalwareScanSession?> BeginScanAsync(IMalwareScanner scanner, StoredFile file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await scanner.BeginScanAsync(cancellationToken);
+        }
+        catch (MalwareScanFailedException ex)
+        {
+            logger.LogWarning(ex, "Stored file {FileId} wasn't rescanned for malware: {Reason}", file.Id, ex.Message);
+            return null;
+        }
+    }
+
+    private async Task<bool> WriteToScanAsync(IMalwareScanSession scan, ReadOnlyMemory<byte> bytes, StoredFile file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await scan.WriteAsync(bytes, cancellationToken);
+            return true;
+        }
+        catch (MalwareScanFailedException ex)
+        {
+            logger.LogWarning(ex, "Stored file {FileId} wasn't rescanned for malware: {Reason}", file.Id, ex.Message);
+            await scan.DisposeAsync();
+            return false;
+        }
+    }
+
+    private async Task<MalwareScanResult?> CompleteScanAsync(IMalwareScanSession scan, StoredFile file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await scan.CompleteAsync(cancellationToken);
+        }
+        catch (MalwareScanFailedException ex)
+        {
+            logger.LogWarning(ex, "Stored file {FileId} wasn't rescanned for malware: {Reason}", file.Id, ex.Message);
+            return null;
+        }
     }
 }

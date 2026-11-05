@@ -1,5 +1,6 @@
 using GM.FileStorage.AzureBlob;
 using GM.FileStorage.Encryption;
+using GM.FileStorage.MalwareScanner;
 using GM.FileStorage.Local;
 using GM.FileStorage.S3;
 using GM.Caching;
@@ -27,10 +28,15 @@ public static class DependencyInjection
     {
         AddFileStorage(services, configuration);
 
-        // Encryption at rest, off in appsettings.json (FileStorage:Encryption:Enabled). Turn it on together with the
-        // master keys, supplied as secrets (appsecrets.json, SECRETS_PROVIDER, environment): every file is then
-        // encrypted with its own AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
+        // Encryption at rest, on in appsettings.json (FileStorage:Encryption:Enabled), with the master keys supplied as
+        // secrets (appsecrets.json, SECRETS_PROVIDER, environment): every file is encrypted with its own AES-256-GCM key,
+        // wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
         services.AddGMFileStorageEncryption(configuration);
+
+        // Malware scanning with ClamAV, off unless FileStorage:MalwareScanner:Enabled: every upload is scanned as it
+        // streams in and refused when infected (or when ClamAV can't answer). Registered after encryption, so it sees the
+        // plaintext.
+        services.AddGMFileStorageMalwareScanner(configuration);
 
         // Bytes each tenant may store (Quotas:BytesPerTenant).
         services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
@@ -42,9 +48,10 @@ public static class DependencyInjection
         if (redis)
             services.AddGMRedisRateLimitStore();
 
-        // Readiness: /health/ready fails while the catalog database is unreachable.
+        // Readiness: /health/ready fails while the catalog database is unreachable, or ClamAV while scanning is on.
         services.AddHealthChecks()
-            .AddGMDatabaseCheck<ApplicationDbContext>();
+            .AddGMDatabaseCheck<ApplicationDbContext>()
+            .AddGMFileStorageMalwareScannerCheck();
 
         return services;
     }
@@ -61,6 +68,10 @@ public static class DependencyInjection
     {
         AddFileStorage(services, configuration);
         services.AddGMFileStorageEncryption(configuration);
+
+        // When scanning is on, the integrity check also rescans what it reads, catching files that match signatures
+        // added since they were uploaded.
+        services.AddGMFileStorageMalwareScanner(configuration);
 
         // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
         // configured) so several workers never clean at the same time.
