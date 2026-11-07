@@ -1,26 +1,8 @@
 # Configuration
 
-Each process reads `appsettings.json`, then `appsettings.Local.json` (gitignored, optional), then layers secrets over
-them with GM.Secrets: `appsecrets.json` (gitignored), the store named by `SECRETS_PROVIDER`, and environment
-variables. Settings that aren't secret live in `appsettings.json`, with this machine's own choices in
-`appsettings.Local.json`; connection strings, cloud credentials and encryption keys live in `appsecrets.json`.
-
-For example, to keep files on another disk, or in a bucket, without touching the committed defaults:
-
-```jsonc
-// appsettings.Local.json, next to appsettings.json in the API and in the worker
-{
-  "FileStorage": {
-    "Provider": "S3",                         // or "AzureBlob", "Local"
-    "Local": { "RootPath": "C:/Files" },
-    "S3": { "BucketName": "my-bucket", "Region": "eu-north-1" },
-    "AzureBlob": { "ContainerName": "my-container" }
-  }
-}
-```
-
-The keys for those (`FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString`) go in
-`appsecrets.json`.
+Each process reads `appsettings.json`, then layers secrets over it with GM.Secrets: `appsecrets.json`
+(gitignored), the store named by `SECRETS_PROVIDER`, and environment variables. Settings that aren't secret live
+in `appsettings.json`; connection strings, cloud credentials and encryption keys live in `appsecrets.json`.
 
 **Diagrams in this doc:** [Configuration sources](#configuration-sources--flowchart)  
 All diagrams: [index](README.md)
@@ -37,7 +19,6 @@ flowchart LR
         a2[appsecrets.example.json<br/>demo values only]
     end
     subgraph local[Local, gitignored]
-        l1[appsettings.Local.json<br/>this machine's settings]
         s1[appsecrets.json]
     end
     env[SECRETS_PROVIDER store<br/>environment variables]
@@ -45,7 +26,6 @@ flowchart LR
 
     a2 -. copy once .-> s1
     a1 --> cfg
-    l1 --> cfg
     s1 --> cfg
     env --> cfg
 ```
@@ -60,8 +40,8 @@ flowchart LR
 | `Idempotency:LockExpiry` (10 minutes: how long a request holds its `Idempotency-Key`, longer than an upload takes) | | ✓ | | appsettings.json |
 | `Kestrel:Limits:MaxRequestBodySize` (60 MB) | ✓ | ✓ | | appsettings.json |
 | `ConnectionStrings:ApplicationDatabase` | | ✓ | ✓ | appsecrets.json |
-| `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json (this machine: appsettings.Local.json) |
-| `FileStorage:Local:RootPath` | | ✓ | ✓ | appsettings.json or appsettings.Local.json — must be the same folder |
+| `FileStorage:Provider`, `KeyTemplate`, upload rules | | ✓ | ✓¹ | appsettings.json |
+| `FileStorage:Local:RootPath` | | ✓ | ✓ | appsettings.json — must be the same folder |
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
 | `FileStorage:Encryption:Enabled` (on), `ActiveKeyId` and `Keys` (the master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsettings.json (on) / appsecrets.json (keys) |
 | `Quotas:BytesPerTenant` (1 GB; 0 is unlimited) | | ✓ | | appsettings.json |
@@ -108,8 +88,8 @@ Health: `/health/live` is the gateway itself, and `/health/ready` also calls the
 
 ## Shared storage root
 
-The API and worker run from their own project folders, so both point `FileStorage:Local:RootPath` at
-`../App_Data/file-storage`, the repository root's `App_Data` folder. If the worker looked at a different folder,
+The API and worker both point `FileStorage:Local:RootPath` at `C:/Files` (Docker sets its own volume). If the
+worker looked at a different folder,
 its deletes would miss the API's files and the queue would back off forever.
 
 ## Storage keys

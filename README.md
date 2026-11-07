@@ -344,8 +344,8 @@ curl -H "$T" -H "$U" -X POST "https://localhost:7141/api/v1/files/6f1e…/restor
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
 
-Files land under `FileStorage:Local:RootPath`, which is `../App_Data/file-storage`: the repository root's
-`App_Data` folder (gitignored), shared by the API and worker. To run on S3/MinIO
+Files land under `FileStorage:Local:RootPath`, which is `C:/Files`, shared by the API and worker (Docker uses its
+own volume instead). To run on S3/MinIO
 or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
 - **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
 - **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
