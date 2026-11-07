@@ -99,7 +99,7 @@ erDiagram
     stored_files {
         uuid id PK "the file's id; every route uses it"
         string tenant_id "X-Tenant-Id or public; indexed, every query is scoped to it"
-        string storage_key UK "where the bytes are, named after the id only: 9f/9f1c…"
+        string storage_key UK "where the bytes are, under its tenant and upload date, named after the id: tenant/2026/11/07/9f1c…"
         string file_name
         string content_type
         bigint size

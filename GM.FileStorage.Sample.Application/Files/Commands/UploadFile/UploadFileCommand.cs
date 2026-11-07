@@ -41,7 +41,7 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 
 /// <remarks>
 /// A file has one identifier, a GUID (its id, which is also its key). Where its bytes live is separate: a storage key
-/// from FileStorage:KeyTemplate (e.g. <c>documents/9f/9f1c….pdf</c>).
+/// from FileStorage:KeyTemplate (e.g. <c>3f2b9c1e-…/2026/11/07/9f1c…</c>: the tenant, then the upload date).
 /// <para>
 /// Storage and the catalog can't share a transaction, so the handler orders its steps so that every failure
 /// leaves at worst unreferenced bytes, and those are always queued for deletion (<see cref="StorageCleanup"/>):
@@ -60,17 +60,18 @@ public class UploadFileCommandHandler(
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
-        // The caller's tenant, recorded on the file (the uploader is the audit column CreatedBy). Neither goes to
-        // storage: the stored object carries nothing that identifies it.
+        // The caller's tenant, recorded on the file (the uploader is the audit column CreatedBy). The stored object
+        // carries nothing that identifies it; the tenant only names the folder its key starts with ({meta:tenantId}).
         var tenantId = actor.TenantOrShared();
         var metadata = new Dictionary<string, string>();
+        var keyValues = new Dictionary<string, string> { ["tenantId"] = tenantId };
 
         // The file's id, and where its bytes go: a path from FileStorage:KeyTemplate built on that id, so the stored
         // object is named after the file. It's needed before the upload (it's queued first), so it's built from the
         // declared content type; with FileStorage:VerifyContentType on, a declaration the bytes don't match is
         // rejected by the upload, so the {category} folder can't lie.
         var id = Guid.NewGuid();
-        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, metadata) { ContentType = request.ContentType, Id = id });
+        var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, keyValues) { ContentType = request.ContentType, Id = id });
 
         // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
         // upload has streamed, so it's checked again then).

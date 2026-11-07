@@ -109,7 +109,7 @@ public static class DependencyInjection
     // All three backends are registered; FileStorage:Provider (default "Local") decides which one IFileStorageService
     // resolves to — swapping storage is a config change, not a code change. The S3 and Azure clients are only
     // constructed when their provider is selected, so the sample runs on disk out of the box with no cloud config.
-    // Generated storage keys follow FileStorage:KeyTemplate ({category}/{shard}/{id}{ext}).
+    // Generated storage keys follow FileStorage:KeyTemplate ({meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}).
     private static void AddFileStorage(IServiceCollection services, IConfiguration configuration)
     {
         services.AddGMFileStorage(configuration);
