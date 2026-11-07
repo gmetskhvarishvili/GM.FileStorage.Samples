@@ -219,16 +219,16 @@ always queued for deletion in the `storage_cleanups` table.
 
 On, in the API's and the worker's appsettings.json (the worker's integrity check reads files back). The master key
 is a secret, so it lives in `appsecrets.json` with the other secrets, never in appsettings.json; without one,
-storage fails at first use instead of quietly writing plaintext. The demo key below (`local-dev`) is the one
-docker-compose passes:
+storage fails at first use instead of quietly writing plaintext. The committed appsecrets.json files carry a demo key
+(`local-dev`); docker-compose passes its own:
 
 ```jsonc
-// appsecrets.json (gitignored)
+// appsecrets.json (committed, demo values)
 {
   "FileStorage": {
     "Encryption": {
       "ActiveKeyId": "local-dev",
-      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
+      "Keys": { "local-dev": "4np4paalIZ479mKVwdxd61u5lXPXuhhO9zuZlHLvtMQ=" }
     }
   }
 }
@@ -277,9 +277,9 @@ docker compose up -d postgres   # postgres:16 on localhost:5432, user postgres /
 ```
 
 The connection string lives in **`appsecrets.json`** of the API and of the worker, not in `appsettings.json`.
-Those files are gitignored. Create `GM.FileStorage.Sample.API/appsecrets.json` and
-`GM.FileStorage.Sample.Worker/appsecrets.json` with the docker-compose database's demo credentials and the demo
-master key:
+They're committed with local demo values only: the docker-compose database's credentials and a demo master
+key. The cloud fields are empty. Put real keys in the secrets store named by `SECRETS_PROVIDER`, or in environment
+variables (`FileStorage__S3__AccessKey`, …), not in these files, so they never reach git. Both files hold:
 
 ```json
 {
@@ -289,14 +289,13 @@ master key:
   "FileStorage": {
     "Encryption": {
       "ActiveKeyId": "local-dev",
-      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
-    }
+      "Keys": { "local-dev": "4np4paalIZ479mKVwdxd61u5lXPXuhhO9zuZlHLvtMQ=" }
+    },
+    "S3": { "AccessKey": "", "SecretKey": "" },
+    "AzureBlob": { "ConnectionString": "" }
   }
 }
 ```
-
-Cloud storage adds its keys there too: `FileStorage:S3:AccessKey` / `SecretKey`, or
-`FileStorage:AzureBlob:ConnectionString`.
 
 The worker reads its own copy. These read the API's:
 - GM.API, which layers it over `appsettings.json` through GM.Secrets;
@@ -354,7 +353,8 @@ Files land under `FileStorage:Local:RootPath`, which is `C:/Files`, shared by th
 own volume instead). To run on S3/MinIO
 or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
 - **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
-- **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
+- **Credentials** go in environment variables or the secrets store, or in `appsecrets.json` on your machine only
+  (don't commit them):
   - `FileStorage:S3:AccessKey` / `SecretKey`;
   - `FileStorage:AzureBlob:ConnectionString`.
 
@@ -403,7 +403,7 @@ Outside Docker, run ClamAV yourself and set `FileStorage:MalwareScanner:Enabled`
 ## Testing
 
 ```bash
-dotnet test   # with Postgres running and appsecrets.json in place (see Database setup)
+dotnet test   # with Postgres running (see Database setup)
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)

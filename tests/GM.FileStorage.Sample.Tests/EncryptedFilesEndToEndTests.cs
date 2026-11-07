@@ -33,8 +33,9 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
 
     public EncryptedFilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>()
-            // Local disk whatever this machine's appsecrets.json chooses.
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
             .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:Encryption:Enabled", "true")
             .WithConfig("FileStorage:Encryption:ActiveKeyId", "test")

@@ -1,7 +1,7 @@
 # Configuration
 
 Each process reads `appsettings.json`, then layers secrets over it with GM.Secrets: `appsecrets.json`
-(gitignored), the store named by `SECRETS_PROVIDER`, and environment variables. Settings that aren't secret live
+(committed with local demo values), the store named by `SECRETS_PROVIDER`, and environment variables. Settings that aren't secret live
 in `appsettings.json`; connection strings, cloud credentials and encryption keys live in `appsecrets.json`.
 
 **Diagrams in this doc:** [Configuration sources](#configuration-sources--flowchart)  
@@ -16,9 +16,7 @@ title: Configuration sources — flowchart
 flowchart LR
     subgraph committed[Committed]
         a1[appsettings.json]
-    end
-    subgraph local[Local, gitignored]
-        s1[appsecrets.json]
+        s1[appsecrets.json<br/>local demo values]
     end
     env[SECRETS_PROVIDER store<br/>environment variables]
     cfg((IConfiguration))
@@ -51,7 +49,7 @@ flowchart LR
 
 ## Setting up the secrets
 
-Create `appsecrets.json` in the API's and the worker's folders (gitignored):
+`appsecrets.json` in the API's and the worker's folders:
 
 ```json
 {
@@ -61,15 +59,17 @@ Create `appsecrets.json` in the API's and the worker's folders (gitignored):
   "FileStorage": {
     "Encryption": {
       "ActiveKeyId": "local-dev",
-      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
-    }
+      "Keys": { "local-dev": "4np4paalIZ479mKVwdxd61u5lXPXuhhO9zuZlHLvtMQ=" }
+    },
+    "S3": { "AccessKey": "", "SecretKey": "" },
+    "AzureBlob": { "ConnectionString": "" }
   }
 }
 ```
 
-These are the docker-compose database's demo credentials and the demo master key; cloud keys
-(`FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString`) go here too. CI passes the
-same values as environment variables. The gateway has no secrets.
+They're committed with local demo values only: the docker-compose database's credentials and a demo master
+key. The cloud fields are empty. Put real keys in the secrets store named by `SECRETS_PROVIDER`, or in environment
+variables (`FileStorage__S3__AccessKey`, …), not in these files, so they never reach git. The gateway has no secrets.
 
 ## Gateway
 
