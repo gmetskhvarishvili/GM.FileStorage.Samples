@@ -1,7 +1,7 @@
 meta {
   name: Get File History
   type: http
-  seq: 14
+  seq: 13
 }
 
 get {
@@ -30,7 +30,6 @@ tests {
 }
 
 docs {
-  What happened to the file, newest first: uploaded, downloaded (the whole file, or a range from its first byte),
-  deleted, restored. Each entry has who did it: user, client and session from the sign-in, IP, user agent,
-  correlation id.
+  What happened to the file, newest first: uploaded, downloaded, deleted, restored. Each entry has who did it: user,
+  client and session from the actor headers, IP, user agent, correlation id.
 }

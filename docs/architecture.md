@@ -49,7 +49,7 @@ flowchart LR
 
 - **Clients only talk to the gateway.** It forwards `/api/{version}/files/**` and `/swagger/**` to the API.
   It doesn't sign callers in: the actor headers (`X-Tenant-Id`, `X-User-Id`) pass through as the client sent them.
-  Bodies are streamed through, never buffered, so large uploads and `Range` downloads pass unchanged.
+  Bodies are streamed through, never buffered, so large uploads and downloads pass unchanged.
 - **The API holds no background work.** It serves requests and applies migrations at startup.
 - **The worker holds no HTTP surface.** It reads the `storage_cleanups` queue and deletes the bytes that
   nothing points at any more.

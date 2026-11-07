@@ -21,7 +21,7 @@ namespace GM.FileStorage.Sample.Tests;
 
 /// <summary>
 /// The sample with encryption at rest switched on (a master key under FileStorage:Encryption): the bytes on disk are
-/// ciphertext, while uploads, downloads and ranges over HTTP behave exactly as without it.
+/// ciphertext, while uploads and downloads over HTTP behave exactly as without it.
 /// Requires Postgres; no-ops if it isn't reachable.
 /// </summary>
 public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
@@ -100,13 +100,8 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
         Assert.StartsWith("GMFE", Encoding.ASCII.GetString(storedBytes, 0, 4));
         Assert.DoesNotContain("X1234567", Encoding.UTF8.GetString(storedBytes), StringComparison.Ordinal);
 
-        // Over HTTP: the original bytes, ranges included.
+        // Over HTTP: the original bytes.
         Assert.Equal(original, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/files/{uploaded.Id}/content");
-        request.Headers.Range = new RangeHeaderValue(25, 32);
-        var range = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.PartialContent, range.StatusCode);
-        Assert.Equal("X1234567", await range.Content.ReadAsStringAsync());
     }
 
     private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);

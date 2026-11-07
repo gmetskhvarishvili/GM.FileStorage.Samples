@@ -50,7 +50,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | 1–20 files, one result each, retry the failed ones; 21+ discards and refuses |
 | [List — user flow](user-flows.md#list--user-flow) | Filters and paging |
 | [Details — user flow](user-flows.md#details--user-flow) | Visible or deleted file, 200 / 404 |
-| [Download — user flow](user-flows.md#download--user-flow) | Whole file or a range, recorded in the history, 200 / 206 / 404 / 416 |
+| [Download — user flow](user-flows.md#download--user-flow) | The whole file, recorded in the history, 200 / 404 |
 | [History — user flow](user-flows.md#history--user-flow) | Who uploaded, downloaded, deleted and restored the file, 200 / 400 / 404 |
 | [Delete — user flow](user-flows.md#delete--user-flow) | Soft delete, 204 / 404 |
 | [Restore — user flow](user-flows.md#restore--user-flow) | Bytes still there, 204 / 404 |
@@ -66,11 +66,11 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [Batch upload — sequence](sequence-diagrams.md#batch-upload--sequence) | One single upload per file as it arrives, per-file results, discard past 20 |
 | [List — sequence](sequence-diagrams.md#list--sequence) | Specification, count, page, mapping |
 | [Details — sequence](sequence-diagrams.md#details--sequence) | Visibility filter |
-| [Download — sequence](sequence-diagrams.md#download--sequence) | Ranges, missing bytes, recording the download, 206 / 416 |
+| [Download — sequence](sequence-diagrams.md#download--sequence) | Missing bytes, recording the download, 200 / 404 |
 | [History — sequence](sequence-diagrams.md#history--sequence) | The file's events from the domain-event log, newest first |
 | [Delete — sequence](sequence-diagrams.md#delete--sequence) | Soft remove, bytes untouched |
 | [Restore — sequence](sequence-diagrams.md#restore--sequence) | Bytes check, restore |
-| [Encryption at rest — sequence](sequence-diagrams.md#encryption-at-rest--sequence) | Per-file key, chunked AES-GCM, ranged decryption |
+| [Encryption at rest — sequence](sequence-diagrams.md#encryption-at-rest--sequence) | Per-file key, chunked AES-GCM, decryption as it streams |
 | [Storage cleanup — sequence](sequence-diagrams.md#storage-cleanup--sequence) | The worker's lock, claim, delete, back-off |
 | [Integrity check — sequence](sequence-diagrams.md#integrity-check--sequence) | Reading stored bytes back: missing, wrong size, checksum mismatch, checksums filled in |
 | [Retention — sequence](sequence-diagrams.md#retention--sequence) | Purging files deleted longer ago than retention allows |

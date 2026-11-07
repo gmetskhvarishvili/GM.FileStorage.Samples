@@ -275,38 +275,22 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Download_honours_range_requests()
+    public async Task Download_ignores_range_requests()
     {
         if (!_infraReady) return; // integration test: no-op when Postgres isn't reachable
 
         using var client = Client(_factory);
-        var bytes = Encoding.ASCII.GetBytes("%PDF-1.7 0123456789"); // 19 bytes
-        var uploaded = await UploadAsync(client, bytes, "video-ish.pdf");
-        var url = $"/api/v1/files/{uploaded.Id}/content";
+        var bytes = Encoding.ASCII.GetBytes("%PDF-1.7 0123456789");
+        var uploaded = await UploadAsync(client, bytes, "whole.pdf");
 
-        async Task<HttpResponseMessage> GetRange(string range)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Range = RangeHeaderValue.Parse(range);
-            return await client.SendAsync(request);
-        }
-
-        var middle = await GetRange("bytes=9-12");
-        Assert.Equal(HttpStatusCode.PartialContent, middle.StatusCode);
-        Assert.Equal("bytes 9-12/19", middle.Content.Headers.ContentRange!.ToString());
-        Assert.Equal("0123", await middle.Content.ReadAsStringAsync());
-
-        var tail = await GetRange("bytes=-3");
-        Assert.Equal("bytes 16-18/19", tail.Content.Headers.ContentRange!.ToString());
-        Assert.Equal("789", await tail.Content.ReadAsStringAsync());
-
-        var pastTheEnd = await GetRange("bytes=19-");
-        Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, pastTheEnd.StatusCode);
-        Assert.Equal("bytes */19", pastTheEnd.Content.Headers.ContentRange!.ToString());
-
-        var whole = await client.GetAsync(url);
-        Assert.Equal(HttpStatusCode.OK, whole.StatusCode);
-        Assert.Contains("bytes", whole.Headers.AcceptRanges);
+        // A Range header gets the whole file, and nothing advertises ranges.
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/files/{uploaded.Id}/content");
+        request.Headers.Range = new RangeHeaderValue(9, 12);
+        var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Null(response.Content.Headers.ContentRange);
+        Assert.Empty(response.Headers.AcceptRanges);
+        Assert.Equal(bytes, await response.Content.ReadAsByteArrayAsync());
     }
 
     [Fact]
@@ -319,17 +303,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var uploaded = await UploadAsync(client, Encoding.ASCII.GetBytes("%PDF-1.7 0123456789"), "history.pdf");
         var url = $"/api/v1/files/{uploaded.Id}/content";
 
-        async Task GetRange(string range)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Range = RangeHeaderValue.Parse(range);
-            Assert.Equal(HttpStatusCode.PartialContent, (await client.SendAsync(request)).StatusCode);
-        }
-
-        // The whole file, then a player opening it from the start and seeking: the seek isn't another download.
+        // Two downloads, two entries.
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(url)).StatusCode);
-        await GetRange("bytes=0-3");
-        await GetRange("bytes=9-12");
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(url)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{uploaded.Id}")).StatusCode);
 
         // Newest first, each with who did it; a deleted file's history stays readable. Deleting also hides and

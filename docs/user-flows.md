@@ -174,19 +174,11 @@ flowchart TD
     live -- no, unknown or deleted --> f404[404]
     live -- yes --> bytes{Bytes in storage?}
     bytes -- no, removed out of band --> b404[404]
-    bytes -- yes --> range{Range header?}
-    range -- none, or several ranges --> rec[Recorded in the file's history]
-    rec --> full[200 whole file, streamed<br/>Accept-Ranges: bytes]
-    range -- one range --> fits{Inside the file?}
-    fits -- no --> r416[416 Range Not Satisfiable<br/>Content-Range: bytes */size]
-    fits -- yes --> first{From the first byte?}
-    first -- yes --> recr[Recorded in the file's history]
-    recr --> part[206 Partial Content<br/>only those bytes read]
-    first -- no, a seek or a resume --> part
+    bytes -- yes --> rec[Recorded in the file's history]
+    rec --> full[200 whole file, streamed]
 ```
 
-Ranges let video players seek and interrupted downloads resume. With encryption at rest on, the same responses
-come back decrypted.
+Always the whole file: a `Range` header is ignored. With encryption at rest on, it comes back decrypted.
 
 ## History — user flow
 
@@ -245,7 +237,7 @@ journey
       Check its details: 4: Caller
     section Use
       Download it: 5: Caller
-      Resume a download with Range: 4: Caller
+      See who opened it: 4: Caller
     section Change
       Upload a newer scan as a new file: 4: Caller
       Delete it by mistake: 2: Caller

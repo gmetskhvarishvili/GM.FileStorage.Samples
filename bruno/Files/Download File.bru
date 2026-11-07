@@ -17,7 +17,6 @@ tests {
   
   test("streams the PDF", function () {
     expect(res.getHeader("content-type")).to.contain("application/pdf");
-    expect(res.getHeader("accept-ranges")).to.equal("bytes");
   });
 }
 

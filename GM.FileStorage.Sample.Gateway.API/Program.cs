@@ -37,7 +37,7 @@ else
 // ---------------------------------------------------------------------------------------------
 // YARP reverse proxy + GM rate limiting, both from configuration (see appsettings.json): every route
 // forwards to the files API; uploads get a tighter limit than reads. Bodies are streamed
-// through, never buffered, so large uploads and ranged downloads (206) pass untouched.
+// through, never buffered, so large uploads and downloads pass untouched.
 //
 // The files API takes the caller's tenant and user from X-Tenant-Id / X-User-Id. The gateway doesn't sign callers
 // in: they pass through as the client sent them, so whoever runs it in front of real users authenticates them first
