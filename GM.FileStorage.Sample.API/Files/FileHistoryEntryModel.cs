@@ -5,15 +5,17 @@ namespace GM.FileStorage.Sample.API.Files;
 /// <summary>One thing that happened to a file, and who did it.</summary>
 public class FileHistoryEntryModel
 {
+    /// <summary>The entry's id; the X-Pagination header's LastKeyValue for the next page by key.</summary>
+    public Guid Id { get; set; }
     /// <summary>What happened: <c>Uploaded</c>, <c>Downloaded</c>, <c>Deleted</c>, <c>Restored</c>, …</summary>
     public string Action { get; set; } = null!;
     /// <summary>When (UTC).</summary>
     public DateTime OccurredAtUtc { get; set; }
-    /// <summary>The signed-in user (<c>X-User-Id</c>); null for a caller without one.</summary>
+    /// <summary>The user (<c>X-User-Id</c>); null for a caller without one.</summary>
     public Guid? UserId { get; set; }
-    /// <summary>The client application they signed in through (<c>X-Client-Id</c>).</summary>
+    /// <summary>The client application (<c>X-Client-Id</c>).</summary>
     public Guid? ClientId { get; set; }
-    /// <summary>Their sign-in session (<c>X-Session-Id</c>).</summary>
+    /// <summary>The session (<c>X-Session-Id</c>).</summary>
     public Guid? SessionId { get; set; }
     /// <summary>The caller's IP address.</summary>
     public string? IpAddress { get; set; }
