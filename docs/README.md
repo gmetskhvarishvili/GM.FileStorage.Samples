@@ -45,7 +45,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | Diagram | Shows |
 | --- | --- |
 | [File lifecycle — state diagram](user-flows.md#file-lifecycle--state-diagram) | Live, deleted, restored, purged by retention; content never changes |
-| [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | Route match, sign-in, rate limits, 401 / 403 / 429 / 502 |
+| [Gateway checks — user flow](user-flows.md#gateway-checks--user-flow) | Route match, rate limits, 429 / 502 |
 | [Upload — user flow](user-flows.md#upload--user-flow) | One file streamed, validation, upload rules, 200 / 400 |
 | [Batch upload — user flow](user-flows.md#batch-upload--user-flow) | 1–20 files, one result each, retry the failed ones; 21+ discards and refuses |
 | [List — user flow](user-flows.md#list--user-flow) | Filters and paging |
@@ -61,7 +61,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | Diagram | Shows |
 | --- | --- |
 | [Startup — sequence](sequence-diagrams.md#startup--sequence) | Secrets, migrations, job scheduling, the gateway's routes |
-| [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) | Token check, actor headers, rate-limit check, forwarding, 401 / 403 / 429 / 502 |
+| [Gateway forwarding — sequence](sequence-diagrams.md#gateway-forwarding--sequence) | Rate-limit check, forwarding, 429 / 502 |
 | [Upload — sequence](sequence-diagrams.md#upload--sequence) | Streamed off the request, queue, upload, one transaction, failures, discard |
 | [Batch upload — sequence](sequence-diagrams.md#batch-upload--sequence) | One single upload per file as it arrives, per-file results, discard past 20 |
 | [List — sequence](sequence-diagrams.md#list--sequence) | Specification, count, page, mapping |

@@ -16,8 +16,6 @@
         <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
         <PackageReference Include="GM.DistributedLock.Redis" Version="1.0.2" />
         <PackageReference Include="GM.RateLimiting.Redis" Version="1.0.1" />
-        <!-- Sign-in: GM.Identity's bearer tokens, checked against its session store in Redis. -->
-        <PackageReference Include="GM.Identity" Version="3.1.0" />
         <!-- Liveness/readiness endpoints for the edge, including a probe of the files API. -->
         <PackageReference Include="GM.HealthChecks" Version="1.0.2" />
         <!-- Swagger UI at the root, rendering the files API's OpenAPI document proxied through the gateway. -->

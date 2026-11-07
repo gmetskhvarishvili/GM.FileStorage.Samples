@@ -12,16 +12,14 @@ namespace GM.FileStorage.Sample.Gateway.Tests;
 
 /// <summary>
 /// The gateway as configured in its appsettings.json — routes, per-IP rate limits, health, Swagger UI — in front of
-/// <see cref="StubFilesApi"/> instead of the real files API, with sign-in off and no Redis (in-memory rate limits);
-/// <see cref="GatewaySignInTests"/> covers sign-in. Each test gets a fresh gateway, so rate-limit counters start at zero.
+/// <see cref="StubFilesApi"/> instead of the real files API. Each test gets a fresh gateway, so rate-limit counters
+/// start at zero.
 /// </summary>
-[Collection(GatewayEnvironment.Name)]
 public sealed class GatewayTests : IAsyncLifetime
 {
     // Read when the gateway registers its services, so it's set before the host is built (the gateway's appsettings
     // point at https://localhost:7140).
     private const string ApiAddressVariable = "ReverseProxy__Clusters__files-api__Destinations__primary__Address";
-    private const string SignInVariable = "Authentication__Enabled";
 
     private readonly StubFilesApi _api = new();
     private GmWebApplicationFactory<Program> _gateway = null!;
@@ -30,7 +28,6 @@ public sealed class GatewayTests : IAsyncLifetime
     {
         await _api.StartAsync();
         Environment.SetEnvironmentVariable(ApiAddressVariable, _api.Address.ToString());
-        Environment.SetEnvironmentVariable(SignInVariable, "false");
         _gateway = new GmWebApplicationFactory<Program>();
     }
 
@@ -39,7 +36,6 @@ public sealed class GatewayTests : IAsyncLifetime
         await _gateway.DisposeAsync();
         await _api.DisposeAsync();
         Environment.SetEnvironmentVariable(ApiAddressVariable, null);
-        Environment.SetEnvironmentVariable(SignInVariable, null);
     }
 
     private static MultipartFormDataContent PdfForm(string field = "file")
@@ -55,7 +51,7 @@ public sealed class GatewayTests : IAsyncLifetime
     public async Task File_requests_are_forwarded_to_the_api_as_sent()
     {
         using var client = _gateway.CreateClient();
-        // Sign-in off, so the caller's tenant passes through as sent (see the gateway's Program.cs).
+        // No sign-in yet, so the caller's tenant passes through as sent (see the gateway's Program.cs).
         var tenantId = Guid.NewGuid().ToString();
         client.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
 

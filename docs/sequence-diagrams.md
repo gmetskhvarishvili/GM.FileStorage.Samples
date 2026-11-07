@@ -65,22 +65,11 @@ sequenceDiagram
     autonumber
     actor C as Client
     participant G as Gateway
-    participant ID as GM.Identity sessions<br/>(Redis)
     participant RL as Rate-limit store<br/>(GM.Caching)
     participant API
 
-    C->>G: request (Authorization: Bearer token)
+    C->>G: request
     G->>G: match a route → policy (uploads or api), partition by IP
-    opt a file route (sign-in on)
-        G->>ID: GET gm-identity:auth:session:{sha256(token)}
-        alt no token, unknown or expired
-            G-->>C: 401
-        else X-Tenant-Id names another tenant than the session's
-            G-->>C: 403
-        else live session
-            G->>G: drop the client's X-User-Id, X-Tenant-Id, …<br/>set them from the session
-        end
-    end
     G->>RL: count this request in the sliding window
     alt over the limit
         RL-->>G: denied, retry after N s
