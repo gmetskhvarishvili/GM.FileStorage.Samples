@@ -21,7 +21,7 @@ public sealed class StubFilesApi : IAsyncDisposable
     private WebApplication? _app;
 
     /// <summary>One request the stub received.</summary>
-    public sealed record Received(string Method, string PathAndQuery, long BodyLength, string? Range, string? TenantId);
+    public sealed record Received(string Method, string PathAndQuery, long BodyLength, string? TenantId);
 
     public ConcurrentQueue<Received> Requests { get; } = new();
 
@@ -40,13 +40,10 @@ public sealed class StubFilesApi : IAsyncDisposable
         {
             using var body = new MemoryStream();
             await context.Request.Body.CopyToAsync(body);
-            var range = context.Request.Headers.Range.FirstOrDefault();
-            var received = new Received(context.Request.Method, context.Request.Path + context.Request.QueryString, body.Length, range,
+            var received = new Received(context.Request.Method, context.Request.Path + context.Request.QueryString, body.Length,
                 context.Request.Headers["X-Tenant-Id"].FirstOrDefault());
             Requests.Enqueue(received);
 
-            // A ranged request gets a 206, as the API answers one.
-            context.Response.StatusCode = range is null ? StatusCodes.Status200OK : StatusCodes.Status206PartialContent;
             await context.Response.WriteAsJsonAsync(received);
         });
 

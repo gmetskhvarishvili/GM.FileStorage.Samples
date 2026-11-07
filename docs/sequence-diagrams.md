@@ -252,29 +252,19 @@ sequenceDiagram
     participant DB
     participant S as Storage
 
-    C->>API: GET …/content (Range: bytes=1024-2047?)
-    API->>API: one byte range? → offset/length or suffix
+    C->>API: GET …/content
     API->>DB: live file by id
     alt not found or deleted
         API-->>C: 404
     end
-    API->>S: DownloadAsync(storage key, range?)
+    API->>S: DownloadAsync(storage key)
     alt object missing
         S-->>API: FileStorageObjectNotFoundException
         API-->>C: 404
-    else range past the end
-        S-->>API: FileRangeNotSatisfiableException(size)
-        API-->>C: 416 + Content-Range: bytes */size
-    else range
-        S-->>API: stream of just that range
-        opt from the first byte
-            API->>DB: INSERT StoredFileDownloadedDomainEvent<br/>(with the caller's identity)
-        end
-        API-->>C: 206 + Content-Range + Accept-Ranges (streamed)
-    else whole file
+    else found
         S-->>API: stream
         API->>DB: INSERT StoredFileDownloadedDomainEvent<br/>(with the caller's identity)
-        API-->>C: 200 + Accept-Ranges (streamed)
+        API-->>C: 200 (streamed)
     end
 ```
 
@@ -381,13 +371,13 @@ sequenceDiagram
     P-->>E: stored
     E-->>H: plaintext size and checksum
 
-    Note over H,P: download (a range)
-    H->>E: DownloadAsync(key, bytes 200 000–)
+    Note over H,P: download
+    H->>E: DownloadAsync(key)
     E->>P: read the header
     E->>K: master key named in the header
     E->>E: unwrap the file key, unseal the real name, type and checksum
-    E->>P: read from chunk 3 (200 000 / 65 536) on
-    E-->>H: decrypting stream: each chunk authenticated, then skipped to the offset
+    E->>P: read the chunks
+    E-->>H: decrypting stream: each chunk authenticated as it's read
 ```
 
 Any altered, reordered or truncated chunk fails authentication and the download errors instead of returning

@@ -126,8 +126,7 @@ flowchart LR
   exactly as it was, without a re-upload.
 - **Who opened what.** Every download is recorded with who did it (user, client, session, IP, user agent,
   correlation id), next to the upload, delete and restore. `GET /api/v1/files/{id}/history` lists them, newest first.
-  A range from the file's first byte counts as a download; later ranges (a player seeking, a download resuming)
-  don't, so one viewing is one entry.
+- **Whole files only.** A download is always the whole file, streamed; `Range` headers are ignored.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
   and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
@@ -226,7 +225,7 @@ With it on, every file is encrypted with its own AES-256-GCM key, wrapped by the
 (`GM.FileStorage.Encryption`), so the storage root holds only ciphertext. Storage doesn't learn what the file
 is either: next to the bytes, the provider keeps only the name `encrypted` and the type
 `application/octet-stream`; the real name, type and checksum are sealed under the file's key and restored on
-download. Over HTTP nothing changes: uploads, downloads and range requests work as before.
+download. Over HTTP nothing changes: uploads and downloads work as before.
 
 Files stored while encryption was off stay as they were, readable through the API and on disk alike, until
 they're uploaded again.
@@ -240,7 +239,7 @@ they're uploaded again.
 | `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
-| `GET` | `/api/v1/files/{id}/content` | Download the file (streamed; HTTP `Range` → 206); recorded in its history |
+| `GET` | `/api/v1/files/{id}/content` | Download the whole file (streamed); recorded in its history |
 | `GET` | `/api/v1/files/{id}/history?limit=` | What happened to the file, newest first, and who did it (uploaded, downloaded, deleted, restored); 50 by default, at most 100 |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
@@ -343,7 +342,7 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 [`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, through the gateway. Open the
 folder in Bruno, pick the **Local** environment (gateway, API, tenant and user), and run **Files** in order: Upload
 File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key`
-(replayed), sends a batch and a refused type, then lists, reads, downloads a range, checks usage, tries the file as
+(replayed), sends a batch and a refused type, then lists, reads, downloads, checks usage, tries the file as
 another tenant (404), deletes, restores, and reads the file's history. **Health** checks both services. Every request
 has tests, so the whole run doubles as a smoke test:
 
@@ -388,17 +387,18 @@ dotnet test   # with Postgres running and appsecrets.json in place (see Database
 against a throwaway storage root and drive it over HTTP: upload (stored under its own id) → list by user → details →
 download → delete (row marked deleted, bytes kept) → restore. They also cover batch uploads (one result
 per file, a refused file not stopping the rest), the single endpoint refusing several files, Word documents, a
-3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, range requests,
+3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, a `Range` header
+ignored,
 the upload rules, the cleanup job, integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once,
-a file's history recording who downloaded, deleted and restored it (and not a player's seeks), and
+a file's history recording who downloaded, deleted and restored it, and
 `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.
 
 `GatewayTests` (`tests/GM.FileStorage.Sample.Gateway.Tests`) run the gateway as configured in its appsettings.json in
-front of a stub API on a real port: which requests are forwarded (bodies and `Range` included) and which aren't,
+front of a stub API on a real port: which requests are forwarded (bodies included) and which aren't,
 the 30-a-minute upload limit with `429` + `Retry-After` while reads keep their own limit, readiness following the
 API, and Swagger UI served by the gateway itself. They need nothing running.
 
