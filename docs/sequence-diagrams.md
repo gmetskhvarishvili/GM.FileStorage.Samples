@@ -270,7 +270,7 @@ sequenceDiagram
 
 ## History — sequence
 
-`GET /api/v1/files/{id}/history?limit=50`
+`GET /api/v1/files/{id}/history?action=&userId=&…&orderBy=&currentPage=&pageSize=`
 
 ```mermaid
 ---
@@ -282,14 +282,17 @@ sequenceDiagram
     participant API
     participant DB
 
-    C->>API: GET …/history?limit=50
+    C->>API: GET …/history?action=Downloaded&pageSize=10
     API->>DB: is it a file of the caller's tenant? (deleted ones too)
     alt no
         API-->>C: 404
     end
-    API->>DB: domain_events WHERE aggregate = StoredFile/{id}<br/>ORDER BY occurred_on DESC LIMIT 50
+    opt include the total (the default)
+        API->>DB: COUNT domain_events WHERE aggregate = StoredFile/{id}<br/>AND the filters
+    end
+    API->>DB: domain_events WHERE aggregate = StoredFile/{id} AND the filters<br/>ORDER BY occurred_on DESC (or orderBy), one page
     DB-->>API: Uploaded, Downloaded, Deleted, Restored, … + who
-    API-->>C: 200 [ { action, occurredAtUtc, userId, clientId, sessionId, ipAddress, userAgent, correlationId } ]
+    API-->>C: 200 [ { id, action, occurredAtUtc, userId, … } ] + X-Pagination
 ```
 
 ## Delete — sequence

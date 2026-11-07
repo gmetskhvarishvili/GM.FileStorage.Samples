@@ -5,13 +5,16 @@ meta {
 }
 
 get {
-  url: {{gateway}}/api/v1/files/{{fileId}}/history?limit=50
+  url: {{gateway}}/api/v1/files/{{fileId}}/history?pageSize=50
   body: none
   auth: none
 }
 
 params:query {
-  limit: 50
+  pageSize: 50
+  ~action: Downloaded
+  ~orderBy: occurredAtUtc asc
+  ~userId: {{userId}}
 }
 
 tests {
@@ -31,5 +34,6 @@ tests {
 
 docs {
   What happened to the file, newest first: uploaded, downloaded, deleted, restored. Each entry has who did it: user,
-  client and session from the actor headers, IP, user agent, correlation id.
+  client and session from the actor headers, IP, user agent, correlation id. Filter by action, user, client, session,
+  IP or when; order by any field (newest first by default); page by number or by key (X-Pagination header).
 }

@@ -1,8 +1,11 @@
 using FluentValidation;
+using GM.API.Application.Models;
 using GM.EntityFramework.Domain.Common;
+using GM.EntityFramework.Domain.Specifications;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -15,18 +18,62 @@ using System.Threading.Tasks;
 namespace GM.FileStorage.Sample.Application.Files.Queries.GetFileHistory;
 
 /// <summary>
-/// What happened to one of the caller's files, newest first: uploaded, downloaded, deleted, restored, each with who did
-/// it. Read from the domain-event log, which records every change (and every download) with the caller's identity.
-/// A deleted file's history stays readable.
+/// What happened to one of the caller's files: uploaded, downloaded, deleted, restored, each with who did it. Read
+/// from the domain-event log, which records every change (and every download) with the caller's identity. Filtered,
+/// ordered (newest first by default) and paged like any list; a deleted file's history stays readable.
 /// </summary>
-public class GetFileHistoryQuery : IRequest<List<FileHistoryEntryDto>>
+public class GetFileHistoryQuery : GetBaseListQuery, IRequest<PagedListDto<FileHistoryEntryDto>>
 {
-    public const int MaxLimit = 100;
-
     public Guid Id { get; set; }
 
-    /// <summary>At most this many entries, the newest (1 to <see cref="MaxLimit"/>).</summary>
-    public int Limit { get; set; } = 50;
+    /// <summary>Only this action: <c>Uploaded</c>, <c>Downloaded</c>, <c>Deleted</c>, <c>Restored</c>, …</summary>
+    public string? Action { get; set; }
+
+    public Guid? UserId { get; set; }
+    public Guid? ClientId { get; set; }
+    public Guid? SessionId { get; set; }
+    public string? IpAddress { get; set; }
+
+    /// <summary>The fields <see cref="GetBaseListQuery.OrderBy"/> may name, and the log columns they sort by.</summary>
+    public static readonly IReadOnlyDictionary<string, string> OrderFields =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = "Id",
+            ["action"] = "EventType",
+            ["occurredAtUtc"] = "OccurredOn",
+            ["userId"] = "UserId",
+            ["clientId"] = "ClientId",
+            ["sessionId"] = "SessionId",
+            ["ipAddress"] = "IpAddress",
+            ["userAgent"] = "UserAgent",
+        };
+
+    /// <summary>
+    /// <see cref="GetBaseListQuery.OrderBy"/> in the log's columns: <c>"occurredAtUtc desc, userId"</c> becomes
+    /// <c>"OccurredOn desc, UserId asc"</c>. Newest first when none is given.
+    /// </summary>
+    public string ToLogOrder()
+    {
+        if (string.IsNullOrWhiteSpace(OrderBy))
+            return "OccurredOn desc";
+
+        return string.Join(", ", OrderBy.Split(',').Select(term =>
+        {
+            var parts = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var direction = parts.Length > 1 && parts[1].StartsWith("desc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
+            return $"{OrderFields[parts[0]]} {direction}";
+        }));
+    }
+
+    /// <summary>Whether each <c>field [asc|desc]</c> term of <paramref name="orderBy"/> names a known field.</summary>
+    public static bool IsValidOrder(string? orderBy) =>
+        string.IsNullOrWhiteSpace(orderBy) || orderBy.Split(',').All(term =>
+        {
+            var parts = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length is 1 or 2
+                   && OrderFields.ContainsKey(parts[0])
+                   && (parts.Length == 1 || parts[1].ToLowerInvariant() is "asc" or "desc" or "ascending" or "descending");
+        });
 }
 
 public class GetFileHistoryQueryValidator : AbstractValidator<GetFileHistoryQuery>
@@ -34,14 +81,21 @@ public class GetFileHistoryQueryValidator : AbstractValidator<GetFileHistoryQuer
     public GetFileHistoryQueryValidator()
     {
         RuleFor(x => x.Id).NotEmpty();
-        RuleFor(x => x.Limit).InclusiveBetween(1, GetFileHistoryQuery.MaxLimit);
+        RuleFor(x => x.OrderBy)
+            .Must(GetFileHistoryQuery.IsValidOrder)
+            .WithMessage($"OrderBy takes fields from: {string.Join(", ", GetFileHistoryQuery.OrderFields.Keys)}, each optionally asc or desc.");
+        // Paging by key continues after one row in one column's order.
+        RuleFor(x => x.OrderBy)
+            .Must(orderBy => orderBy == null || !orderBy.Contains(','))
+            .When(x => !string.IsNullOrWhiteSpace(x.LastKeyValue))
+            .WithMessage("With LastKeyValue, OrderBy names one field.");
     }
 }
 
 public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor actor)
-    : IRequestHandler<GetFileHistoryQuery, List<FileHistoryEntryDto>>
+    : IRequestHandler<GetFileHistoryQuery, PagedListDto<FileHistoryEntryDto>>
 {
-    public async Task<List<FileHistoryEntryDto>> Handle(GetFileHistoryQuery request, CancellationToken cancellationToken)
+    public async Task<PagedListDto<FileHistoryEntryDto>> Handle(GetFileHistoryQuery request, CancellationToken cancellationToken)
     {
         // Another tenant's file has no history for you: 404, as for an unknown id.
         var owned = await unitOfWork.StoredFileRepository
@@ -56,9 +110,29 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
                 request.Id);
         }
 
-        var events = await unitOfWork.StoredFileRepository.GetHistoryAsync(request.Id, request.Limit, cancellationToken);
-        return events.Select(e => new FileHistoryEntryDto
+        var dateRange = request.ToAuditDateRange();
+        var paging = request.ToPagingOptions();
+        var order = request.ToLogOrder();
+        // Paging by number: entries of the same instant (a delete also hides and deactivates) keep their place
+        // across pages. Paging by key breaks such ties by the key itself.
+        if (!paging.IsKeysetPaging)
+            order += ", Id desc";
+
+        StoredFileHistorySpecification Specification(PagingOptions pagingOptions, OrderingOptions ordering) =>
+            new(request.Id, request.Action, request.UserId, request.ClientId, request.SessionId, request.IpAddress,
+                dateRange, pagingOptions, ordering);
+
+        long? totalCount = paging.IncludeTotalCount
+            ? await unitOfWork.StoredFileRepository.CountHistoryAsync(
+                Specification(PagingOptions.None, OrderingOptions.None), cancellationToken)
+            : null;
+
+        var events = await unitOfWork.StoredFileRepository.ListHistoryAsync(
+            Specification(paging, new OrderingOptions { OrderBy = order }), cancellationToken);
+
+        var items = events.Select(e => new FileHistoryEntryDto
         {
+            Id = e.Id,
             Action = ActionOf(e.EventType),
             OccurredAtUtc = DateTime.SpecifyKind(e.OccurredOn, DateTimeKind.Utc),
             UserId = e.UserId,
@@ -68,6 +142,8 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
             UserAgent = e.UserAgent,
             CorrelationId = e.CorrelationId,
         }).ToList();
+
+        return request.ToPagedListDto(events, items, totalCount);
     }
 
     // GMStoredFileUploadedDomainEvent -> Uploaded, StoredFileDownloadedDomainEvent -> Downloaded.
@@ -89,6 +165,7 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
 
 public class FileHistoryEntryDto
 {
+    public Guid Id { get; init; }
     public required string Action { get; init; }
     public DateTime OccurredAtUtc { get; init; }
     public Guid? UserId { get; init; }

@@ -13,6 +13,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -20,6 +21,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -310,7 +312,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         // Newest first, each with who did it; a deleted file's history stays readable. Deleting also hides and
         // deactivates the file, in the same instant, so those three come in no particular order.
-        var history = await client.GetFromJsonAsync<List<HistoryEntryResponse>>($"/api/v1/files/{uploaded.Id}/history");
+        var historyUrl = $"/api/v1/files/{uploaded.Id}/history";
+        var history = await client.GetFromJsonAsync<List<HistoryEntryResponse>>($"{historyUrl}?pageSize=50");
         Assert.NotNull(history);
         Assert.Equal(["Deactivated", "Deleted", "Hidden"], history.Take(3).Select(x => x.Action).Order());
         Assert.Equal(["Downloaded", "Downloaded", "Uploaded"], history.Skip(3).Select(x => x.Action));
@@ -318,8 +321,49 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.All(history, x => Assert.Equal("history-test/1.0", x.UserAgent));
         Assert.Equal(history.Select(x => x.OccurredAtUtc).OrderDescending(), history.Select(x => x.OccurredAtUtc));
 
-        Assert.Single((await client.GetFromJsonAsync<List<HistoryEntryResponse>>($"/api/v1/files/{uploaded.Id}/history?limit=1"))!);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/v1/files/{uploaded.Id}/history?limit=0")).StatusCode);
+        async Task<(List<HistoryEntryResponse> Items, JsonElement Pagination)> Page(string query)
+        {
+            var response = await client.GetAsync($"{historyUrl}?{query}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var pagination = JsonDocument.Parse(response.Headers.GetValues("X-Pagination").Single()).RootElement;
+            return ((await response.Content.ReadFromJsonAsync<List<HistoryEntryResponse>>())!, pagination);
+        }
+
+        static JsonElement Field(JsonElement pagination, string name) =>
+            pagination.EnumerateObject().Single(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)).Value;
+
+        // Paged by number: two at a time, the same six entries in the same order, the total in X-Pagination.
+        var byNumber = new List<HistoryEntryResponse>();
+        for (var page = 1; page <= 3; page++)
+        {
+            var (items, pagination) = await Page($"pageSize=2&currentPage={page}");
+            Assert.Equal(2, items.Count);
+            Assert.Equal(6, Field(pagination, "totalCount").GetInt64());
+            byNumber.AddRange(items);
+        }
+        Assert.Equal(history.Select(x => x.Id), byNumber.Select(x => x.Id));
+
+        // Paged by key: after the last entry each page ends with, until a page comes back empty.
+        var byKey = new List<HistoryEntryResponse>();
+        var (first, firstPagination) = await Page("pageSize=4&orderBy=occurredAtUtc%20asc");
+        byKey.AddRange(first);
+        var (rest, _) = await Page($"pageSize=4&orderBy=occurredAtUtc%20asc&lastKeyValue={Field(firstPagination, "lastKeyValue").GetString()}");
+        byKey.AddRange(rest);
+        Assert.Equal(6, byKey.Select(x => x.Id).Distinct().Count());
+        Assert.Equal("Uploaded", byKey[0].Action);
+
+        // Filtered: by action (any case), by user, by when.
+        Assert.Equal(["Downloaded", "Downloaded"], (await Page("action=downloaded")).Items.Select(x => x.Action));
+        Assert.Empty((await Page($"userId={Guid.NewGuid()}")).Items);
+        Assert.Equal(6, (await Page($"userId={_userId}&pageSize=50")).Items.Count);
+        var tomorrow = DateTime.UtcNow.AddDays(1).ToString("dd/MM/yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+        Assert.Empty((await Page($"createdAtFrom={Uri.EscapeDataString(tomorrow)}")).Items);
+
+        // Ordered by a field the history has; anything else is refused.
+        Assert.Equal("Uploaded", (await Page("orderBy=occurredAtUtc%20asc")).Items[0].Action);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{historyUrl}?orderBy=fileName")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.GetAsync($"{historyUrl}?orderBy=action,userId&lastKeyValue={Guid.NewGuid()}")).StatusCode);
 
         // Another tenant gets nothing about it.
         using var other = _factory.CreateClient();
@@ -786,7 +830,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     private sealed record UploadResponse(Guid Id, string FileName, string ContentType, long Size, string? Checksum);
 
-    private sealed record HistoryEntryResponse(string Action, DateTime OccurredAtUtc, Guid? UserId, string? UserAgent);
+    private sealed record HistoryEntryResponse(Guid Id, string Action, DateTime OccurredAtUtc, Guid? UserId, string? UserAgent);
 
     // Counts the request bytes the app reads, and notes how many it had read when the response started.
     private sealed class BodyReadCounter : IStartupFilter

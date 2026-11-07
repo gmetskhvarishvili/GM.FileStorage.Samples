@@ -125,7 +125,8 @@ flowchart LR
   download; visible with `visibility=All`). The bytes stay in storage, so `RestoreFile` brings the file back
   exactly as it was, without a re-upload.
 - **Who opened what.** Every download is recorded with who did it (user, client, session, IP, user agent,
-  correlation id), next to the upload, delete and restore. `GET /api/v1/files/{id}/history` lists them, newest first.
+  correlation id), next to the upload, delete and restore. `GET /api/v1/files/{id}/history` lists them, newest first
+  by default, and filters, orders and pages them like the files list.
 - **Whole files only.** A download is always the whole file, streamed; `Range` headers are ignored.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
@@ -240,7 +241,7 @@ they're uploaded again.
 | `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the whole file (streamed); recorded in its history |
-| `GET` | `/api/v1/files/{id}/history?limit=` | What happened to the file, newest first, and who did it (uploaded, downloaded, deleted, restored); 50 by default, at most 100 |
+| `GET` | `/api/v1/files/{id}/history?action=&userId=&clientId=&sessionId=&ipAddress=&createdAtFrom=&createdAtTo=&orderBy=&currentPage=&pageSize=&lastKeyValue=` | What happened to the file and who did it (uploaded, downloaded, deleted, restored): filtered, ordered by any of its fields (newest first by default), paged by number or by key with GM.API paging (`X-Pagination` header) |
 | `DELETE` | `/api/v1/files/{id}` | Mark the file deleted (the bytes are kept) |
 | `POST` | `/api/v1/files/{id}/restore` | Restore a deleted file as it was |
 | `GET` | `/health/live` / `/health/ready` / `/health/startup` | Liveness / readiness / startup probes (GM.API) |
@@ -392,7 +393,8 @@ ignored,
 the upload rules, the cleanup job, integrity checks flagging damaged or
 missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once,
-a file's history recording who downloaded, deleted and restored it, and
+a file's history recording who downloaded, deleted and restored it (paged by number and by key, filtered, ordered),
+and
 `PUT` on a file's content being refused (405). They need PostgreSQL and
 **no-op when it isn't reachable**; CI runs them against a `postgres` service container.
 `AggregateConstructorTests` guard that every aggregate keeps a parameterless constructor for EF.

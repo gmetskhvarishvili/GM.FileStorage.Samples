@@ -51,7 +51,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [List — user flow](user-flows.md#list--user-flow) | Filters and paging |
 | [Details — user flow](user-flows.md#details--user-flow) | Visible or deleted file, 200 / 404 |
 | [Download — user flow](user-flows.md#download--user-flow) | The whole file, recorded in the history, 200 / 404 |
-| [History — user flow](user-flows.md#history--user-flow) | Who uploaded, downloaded, deleted and restored the file, 200 / 400 / 404 |
+| [History — user flow](user-flows.md#history--user-flow) | Who uploaded, downloaded, deleted and restored the file: filtered, ordered, paged; 200 / 400 / 404 |
 | [Delete — user flow](user-flows.md#delete--user-flow) | Soft delete, 204 / 404 |
 | [Restore — user flow](user-flows.md#restore--user-flow) | Bytes still there, 204 / 404 |
 | [Typical session — user journey](user-flows.md#typical-session--user-journey) | One document from upload to restore |
@@ -67,7 +67,7 @@ Each action has a user flow (what the caller sees) and a sequence (what happens 
 | [List — sequence](sequence-diagrams.md#list--sequence) | Specification, count, page, mapping |
 | [Details — sequence](sequence-diagrams.md#details--sequence) | Visibility filter |
 | [Download — sequence](sequence-diagrams.md#download--sequence) | Missing bytes, recording the download, 200 / 404 |
-| [History — sequence](sequence-diagrams.md#history--sequence) | The file's events from the domain-event log, newest first |
+| [History — sequence](sequence-diagrams.md#history--sequence) | The file's events from the domain-event log: filters, count, one page |
 | [Delete — sequence](sequence-diagrams.md#delete--sequence) | Soft remove, bytes untouched |
 | [Restore — sequence](sequence-diagrams.md#restore--sequence) | Bytes check, restore |
 | [Encryption at rest — sequence](sequence-diagrams.md#encryption-at-rest--sequence) | Per-file key, chunked AES-GCM, decryption as it streams |
