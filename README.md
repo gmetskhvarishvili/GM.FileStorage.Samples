@@ -219,8 +219,8 @@ always queued for deletion in the `storage_cleanups` table.
 
 On, in the API's and the worker's appsettings.json (the worker's integrity check reads files back). The master key
 is a secret, so it lives in `appsecrets.json` with the other secrets, never in appsettings.json; without one,
-storage fails at first use instead of quietly writing plaintext. The template, `appsecrets.example.json`, comes
-with a random demo key (`local-dev`), and docker-compose passes the same one:
+storage fails at first use instead of quietly writing plaintext. The demo key below (`local-dev`) is the one
+docker-compose passes:
 
 ```jsonc
 // appsecrets.json (gitignored)
@@ -228,13 +228,13 @@ with a random demo key (`local-dev`), and docker-compose passes the same one:
   "FileStorage": {
     "Encryption": {
       "ActiveKeyId": "local-dev",
-      "Keys": { "local-dev": "<base64 of 32 random bytes>" }
+      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
     }
   }
 }
 ```
 
-The template's key is public: it's committed. Anything beyond a local demo needs a key of your own,
+That demo key is public: it's committed. Anything beyond a local demo needs a key of your own,
 generated with `openssl rand -base64 32` and kept safe in your secrets store or password manager. Losing
 the key means losing every file it encrypted.
 
@@ -277,20 +277,26 @@ docker compose up -d postgres   # postgres:16 on localhost:5432, user postgres /
 ```
 
 The connection string lives in **`appsecrets.json`** of the API and of the worker, not in `appsettings.json`.
-Those files are gitignored. Create them from the committed templates, which hold the docker-compose database's
-demo credentials:
-
-```bash
-cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
-```
-
-```bash
-cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
-```
+Those files are gitignored. Create `GM.FileStorage.Sample.API/appsecrets.json` and
+`GM.FileStorage.Sample.Worker/appsecrets.json` with the docker-compose database's demo credentials and the demo
+master key:
 
 ```json
-{ "ConnectionStrings": { "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" } }
+{
+  "ConnectionStrings": {
+    "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+  },
+  "FileStorage": {
+    "Encryption": {
+      "ActiveKeyId": "local-dev",
+      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
+    }
+  }
+}
 ```
+
+Cloud storage adds its keys there too: `FileStorage:S3:AccessKey` / `SecretKey`, or
+`FileStorage:AzureBlob:ConnectionString`.
 
 The worker reads its own copy. These read the API's:
 - GM.API, which layers it over `appsettings.json` through GM.Secrets;
@@ -344,8 +350,8 @@ curl -H "$T" -H "$U" -X POST "https://localhost:7141/api/v1/files/6f1e…/restor
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
 
-Files land under `FileStorage:Local:RootPath`, which is `../App_Data/file-storage`: the repository root's
-`App_Data` folder (gitignored), shared by the API and worker. To run on S3/MinIO
+Files land under `FileStorage:Local:RootPath`, which is `C:/Files`, shared by the API and worker (Docker uses its
+own volume instead). To run on S3/MinIO
 or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
 - **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
 - **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
