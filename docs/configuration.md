@@ -16,7 +16,6 @@ title: Configuration sources — flowchart
 flowchart LR
     subgraph committed[Committed]
         a1[appsettings.json]
-        a2[appsecrets.example.json<br/>demo values only]
     end
     subgraph local[Local, gitignored]
         s1[appsecrets.json]
@@ -24,7 +23,6 @@ flowchart LR
     env[SECRETS_PROVIDER store<br/>environment variables]
     cfg((IConfiguration))
 
-    a2 -. copy once .-> s1
     a1 --> cfg
     s1 --> cfg
     env --> cfg
@@ -53,13 +51,25 @@ flowchart LR
 
 ## Setting up the secrets
 
-```bash
-cp GM.FileStorage.Sample.API/appsecrets.example.json    GM.FileStorage.Sample.API/appsecrets.json
-cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
+Create `appsecrets.json` in the API's and the worker's folders (gitignored):
+
+```json
+{
+  "ConnectionStrings": {
+    "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+  },
+  "FileStorage": {
+    "Encryption": {
+      "ActiveKeyId": "local-dev",
+      "Keys": { "local-dev": "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo=" }
+    }
+  }
+}
 ```
 
-The templates hold the docker-compose database's demo credentials and empty cloud placeholders. The gateway has
-no secrets.
+These are the docker-compose database's demo credentials and the demo master key; cloud keys
+(`FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString`) go here too. CI passes the
+same values as environment variables. The gateway has no secrets.
 
 ## Gateway
 

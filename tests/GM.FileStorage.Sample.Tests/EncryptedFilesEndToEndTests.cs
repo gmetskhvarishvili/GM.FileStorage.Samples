@@ -33,7 +33,7 @@ public sealed class EncryptedFilesEndToEndTests : IAsyncLifetime
 
     public EncryptedFilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>()
-            // Local disk whatever this machine's appsettings.Local.json or appsecrets.json choose.
+            // Local disk whatever this machine's appsecrets.json chooses.
             .WithConfig("FileStorage:Provider", "Local")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:Encryption:Enabled", "true")

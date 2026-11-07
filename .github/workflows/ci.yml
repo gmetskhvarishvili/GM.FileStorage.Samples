@@ -29,9 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create appsecrets.json (connection string for the postgres service)
-        run: cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -43,8 +40,14 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
+      # The postgres service's connection string and the demo master key, as environment variables (no appsecrets.json
+      # in CI), the same ones docker-compose.yml passes.
       - name: Test
         run: dotnet test -c Release --no-build --verbosity normal
+        env:
+          ConnectionStrings__ApplicationDatabase: "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+          FileStorage__Encryption__ActiveKeyId: local-dev
+          FileStorage__Encryption__Keys__local-dev: "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo="
 
   # The whole sample as docker-compose.yml runs it — images built from the Dockerfile — exercised through the gateway.
   compose:
