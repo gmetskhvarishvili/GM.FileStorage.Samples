@@ -46,8 +46,13 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     public FilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            // The production layout, under a per-test folder: {tenant}/{shard}/{id}.
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}");
+            .WithConfig("FileStorage:KeyTemplate", Layout);
+
+    // The production layout (tenant, then the upload date), under a per-test folder.
+    private string Layout => $"{_tenantId}/{{meta:tenantId}}/{{date:yyyy}}/{{date:MM}}/{{date:dd}}/{{id}}";
+
+    // Where the production layout puts a file of this test's tenant uploaded today.
+    private string ExpectedPath(Guid id) => $"{_tenantId}/{_tenantId}/{DateTime.UtcNow:yyyy/MM/dd}/{id:N}";
 
     // A client acting for this test's tenant and user, as the gateway would forward them.
     private HttpClient Client(GmWebApplicationFactory<Program> factory)
@@ -106,17 +111,16 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var client = Client(_factory);
         var original = Encoding.UTF8.GetBytes("%PDF-1.7 passport scan bytes");
 
-        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit at {shard}/{id} from the key
-        // template, named after that id (the shard is its first two characters), with nothing about the file in it.
+        // Upload: the file is a GUID, and that's all callers get. Inside, its bytes sit under its tenant and upload date
+        // from the key template, named after that id, with nothing about the file in it.
         var uploaded = await UploadAsync(client, original, "passport.pdf");
         Assert.NotEqual(Guid.Empty, uploaded.Id);
-        var hex = uploaded.Id.ToString("N");
         var path = await StoragePathAsync(uploaded.Id);
-        Assert.Equal($"{_tenantId}/{hex[..2]}/{hex}", path);
+        Assert.Equal(ExpectedPath(uploaded.Id), path);
         Assert.True(File.Exists(Path.Combine(_root, path)));
 
         // Nothing in storage gives the file away: its bytes are ciphertext, and what's kept beside them names neither
-        // the file, its type nor its tenant. Only the API (holding the master key) can read it.
+        // the file, its type nor its tenant (only the folder does). Only the API (holding the master key) can read it.
         Assert.DoesNotContain("%PDF", Encoding.Latin1.GetString(await File.ReadAllBytesAsync(Path.Combine(_root, path))));
         var sidecar = await File.ReadAllTextAsync(Path.Combine(_root, path + ".gmmeta"));
         foreach (var secret in new[] { "passport", "pdf", _tenantId })
@@ -263,6 +267,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var shared = await UploadAsync(nobody, bytes, "shared.pdf");
         var sharedDetails = await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}");
         Assert.Equal(("public", (Guid?)null), (sharedDetails!.TenantId, sharedDetails.UploadedBy));
+        Assert.Equal($"{_tenantId}/public/{DateTime.UtcNow:yyyy/MM/dd}/{shared.Id:N}", await StoragePathAsync(shared.Id));
         Assert.Single(await ListAsync(nobody, $"id={shared.Id}"));
         Assert.Equal(HttpStatusCode.OK,
             (await SendFilesAsync(nobody, "/api/v1/files/batch", ("a.pdf", "application/pdf", bytes))).StatusCode);
@@ -391,8 +396,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var uploaded = await response.Content.ReadFromJsonAsync<UploadResponse>();
         Assert.Equal(contentType, uploaded!.ContentType);
-        var hex = uploaded.Id.ToString("N");
-        Assert.Equal($"{_tenantId}/{hex[..2]}/{hex}", await StoragePathAsync(uploaded.Id)); // nothing about the type
+        Assert.Equal(ExpectedPath(uploaded.Id), await StoragePathAsync(uploaded.Id)); // nothing about the type
         Assert.Equal(bytes, await client.GetByteArrayAsync($"/api/v1/files/{uploaded.Id}/content"));
     }
 
@@ -404,7 +408,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Same storage root and key template as the other tests, with a limit of 3 files a minute.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
         using var client = Client(factory);
         var batch = $"/api/v1/files/batch";
@@ -433,7 +437,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // A limit of 3 files a minute shows that a replayed retry doesn't count as another file.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
         using var client = Client(factory);
         var single = $"/api/v1/files";
@@ -565,7 +569,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("Quotas:BytesPerTenant", "40");
         using var client = Client(factory);
         byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
@@ -604,7 +608,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         nobody.Stop();
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("FileStorage:MalwareScanner:Enabled", "true")
             .WithConfig("FileStorage:MalwareScanner:ClamAV:Host", "127.0.0.1")
             .WithConfig("FileStorage:MalwareScanner:ClamAV:Port", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -650,7 +654,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var bodyRead = new BodyReadCounter();
         await using var factory = new GmWebApplicationFactory<Program>()
             .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", $"{_tenantId}/{{shard}}/{{id}}")
+            .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("FileStorage:MaxFileSize", limit.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .WithServices(services => services.AddSingleton<IStartupFilter>(bodyRead));
         using var client = Client(factory);

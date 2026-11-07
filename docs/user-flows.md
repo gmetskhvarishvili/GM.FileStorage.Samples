@@ -80,7 +80,7 @@ flowchart TD
     rules -- yes --> scan{No malware?<br/>when scanning is on}
     scan -- "no: malware found" --> m400[400 naming it<br/>nothing kept]
     scan -- "no answer: ClamAV down" --> s503[503 + Retry-After<br/>nothing kept]
-    scan -- "yes, or scanning off" --> stored[Bytes stored, encrypted,<br/>at shard/id]
+    scan -- "yes, or scanning off" --> stored[Bytes stored, encrypted,<br/>at tenant/yyyy/MM/dd/id]
     stored --> saved{Catalog saved?}
     saved -- no --> e500[500<br/>bytes deleted or queued]
     saved -- yes --> more{Another file part<br/>after it?}
