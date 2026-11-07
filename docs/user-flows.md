@@ -187,15 +187,19 @@ Always the whole file: a `Range` header is ignored. With encryption at rest on, 
 title: History — user flow
 ---
 flowchart TD
-    start([GET /api/v1/files/id/history?limit]) --> limit{limit 1 to 100?}
-    limit -- no --> b400[400]
-    limit -- yes --> owned{Your tenant's file?<br/>deleted ones too}
+    start([GET /api/v1/files/id/history<br/>filters, orderBy, paging]) --> order{orderBy names<br/>history fields?}
+    order -- no --> b400[400]
+    order -- yes --> owned{Your tenant's file?<br/>deleted ones too}
     owned -- no --> f404[404]
-    owned -- yes --> list[200 newest first: Uploaded, Downloaded,<br/>Deleted, Restored, … with who did it]
+    owned -- yes --> list[200 one page: Uploaded, Downloaded,<br/>Deleted, Restored, … with who did it<br/>+ X-Pagination]
 ```
 
 Each entry carries the caller's user, client and session (from the actor headers), IP address, user agent and
-correlation id.
+correlation id. Filter by `action` (`Downloaded`, …), `userId`, `clientId`, `sessionId`, `ipAddress`, and by when with
+`createdAtFrom` / `createdAtTo` (`dd/MM/yyyy HH:mm:ss`). `orderBy` takes `occurredAtUtc`, `action`, `userId`,
+`clientId`, `sessionId`, `ipAddress`, `userAgent` or `id`, each `asc` or `desc`; newest first by default. Pages are
+10 entries by default (`pageSize`, at most 100), by number (`currentPage`) or after the last entry you have
+(`lastKeyValue`, from `X-Pagination`, with at most one `orderBy` field).
 
 ## Delete — user flow
 

@@ -196,22 +196,30 @@ public class FilesController(UploadQuota quota) : BaseController
     /// Get File History
     /// </summary>
     /// <remarks>
-    /// What happened to the file, newest first: uploaded, downloaded, deleted, restored, each with who did it (user,
-    /// client, session, IP, user agent, correlation id). A deleted file's history stays readable.
+    /// What happened to the file: uploaded, downloaded, deleted, restored, each with who did it (user, client, session,
+    /// IP, user agent, correlation id). Filter by action, user, client, session or IP and by when (CreatedAtFrom /
+    /// CreatedAtTo); order by any field (newest first by default); page by number or after the last entry
+    /// (LastKeyValue), with paging in the X-Pagination header, as for the files list. A deleted file's history stays
+    /// readable.
     /// </remarks>
     /// <param name="id">The file's id</param>
-    /// <param name="limit">At most this many entries, the newest (1 to 100, default 50)</param>
+    /// <param name="request">Filters, ordering and paging</param>
     /// <param name="cancellationToken"></param>
     [HttpGet("files/{id:guid}/history", Name = nameof(GetFileHistory))]
     [ProducesResponseType(typeof(IEnumerable<FileHistoryEntryModel>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetFileHistory(
         [FromRoute] Guid id,
-        [FromQuery] int limit = 50,
-        CancellationToken cancellationToken = default)
+        [FromQuery] GetFileHistoryModel request,
+        CancellationToken cancellationToken)
     {
-        var response = await Mediator.Send(new GetFileHistoryQuery { Id = id, Limit = limit }, cancellationToken);
-        return Ok(response.Adapt<List<FileHistoryEntryModel>>());
+        var query = request.Adapt<GetFileHistoryQuery>();
+        query.Id = id;
+        var response = await Mediator.Send(query, cancellationToken);
+        AddPaginationHeader(response.TotalCount, response.PageSize, response.CurrentPage, response.TotalPages,
+            response.LastKeyProperty, response.LastKeyValue, response.HasMore);
+        return Ok(response.Items.Adapt<IEnumerable<FileHistoryEntryModel>>());
     }
 
     /// <summary>
