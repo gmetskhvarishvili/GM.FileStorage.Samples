@@ -1,4 +1,6 @@
+using FluentValidation;
 using GM.API.Models;
+using GM.FileStorage.Sample.Application.Files.Queries.GetFileHistory;
 using GM.FileStorage.Sample.Common.Resources;
 using System;
 using System.ComponentModel.DataAnnotations;
@@ -28,4 +30,17 @@ public class GetFileHistoryModel : GetBaseListModel
 
     /// <summary>Only what was done from this IP address.</summary>
     public string? IpAddress { get; set; }
+}
+
+/// <inheritdoc />
+public class GetFileHistoryModelValidator : AbstractValidator<GetFileHistoryModel>
+{
+    /// <inheritdoc />
+    public GetFileHistoryModelValidator()
+    {
+        RuleFor(x => x.OrderBy)
+            .Must((model, orderBy) => GetFileHistoryQuery.IsValidOrder(orderBy, !string.IsNullOrWhiteSpace(model.LastKeyValue)))
+            .WithMessage($"OrderBy takes {string.Join(", ", GetFileHistoryQuery.OrderFields.Keys)}, each optionally asc or desc; " +
+                         "with LastKeyValue, just one of them other than action.");
+    }
 }

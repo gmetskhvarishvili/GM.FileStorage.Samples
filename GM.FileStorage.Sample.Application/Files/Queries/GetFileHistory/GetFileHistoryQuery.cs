@@ -34,12 +34,15 @@ public class GetFileHistoryQuery : GetBaseListQuery, IRequest<PagedListDto<FileH
     public Guid? SessionId { get; set; }
     public string? IpAddress { get; set; }
 
-    /// <summary>The fields <see cref="GetBaseListQuery.OrderBy"/> may name, and the log columns they sort by.</summary>
+    /// <summary>
+    /// The fields <see cref="GetBaseListQuery.OrderBy"/> may name, and what they sort the log by. An action sorts by its
+    /// event type without GM.FileStorage's "GM" prefix, so Downloaded comes before Uploaded whichever library raised it.
+    /// </summary>
     public static readonly IReadOnlyDictionary<string, string> OrderFields =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = "Id",
-            ["action"] = "EventType",
+            ["action"] = "EventType.Replace(\"GMStoredFile\", \"StoredFile\")",
             ["occurredAtUtc"] = "OccurredOn",
             ["userId"] = "UserId",
             ["clientId"] = "ClientId",
@@ -65,8 +68,15 @@ public class GetFileHistoryQuery : GetBaseListQuery, IRequest<PagedListDto<FileH
         }));
     }
 
-    /// <summary>Whether each <c>field [asc|desc]</c> term of <paramref name="orderBy"/> names a known field.</summary>
-    public static bool IsValidOrder(string? orderBy) =>
+    /// <summary>
+    /// Whether <paramref name="orderBy"/> is valid: each <c>field [asc|desc]</c> term names a known field, and paging by
+    /// key (<paramref name="byKey"/>) orders by one column of the log (not by action).
+    /// </summary>
+    public static bool IsValidOrder(string? orderBy, bool byKey) =>
+        IsKnownOrder(orderBy) && (!byKey || string.IsNullOrWhiteSpace(orderBy)
+                                  || (!orderBy.Contains(',') && !orderBy.TrimStart().StartsWith("action", StringComparison.OrdinalIgnoreCase)));
+
+    private static bool IsKnownOrder(string? orderBy) =>
         string.IsNullOrWhiteSpace(orderBy) || orderBy.Split(',').All(term =>
         {
             var parts = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -74,22 +84,6 @@ public class GetFileHistoryQuery : GetBaseListQuery, IRequest<PagedListDto<FileH
                    && OrderFields.ContainsKey(parts[0])
                    && (parts.Length == 1 || parts[1].ToLowerInvariant() is "asc" or "desc" or "ascending" or "descending");
         });
-}
-
-public class GetFileHistoryQueryValidator : AbstractValidator<GetFileHistoryQuery>
-{
-    public GetFileHistoryQueryValidator()
-    {
-        RuleFor(x => x.Id).NotEmpty();
-        RuleFor(x => x.OrderBy)
-            .Must(GetFileHistoryQuery.IsValidOrder)
-            .WithMessage($"OrderBy takes fields from: {string.Join(", ", GetFileHistoryQuery.OrderFields.Keys)}, each optionally asc or desc.");
-        // Paging by key continues after one row in one column's order.
-        RuleFor(x => x.OrderBy)
-            .Must(orderBy => orderBy == null || !orderBy.Contains(','))
-            .When(x => !string.IsNullOrWhiteSpace(x.LastKeyValue))
-            .WithMessage("With LastKeyValue, OrderBy names one field.");
-    }
 }
 
 public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor actor)

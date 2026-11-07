@@ -361,9 +361,14 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         // Ordered by a field the history has; anything else is refused.
         Assert.Equal("Uploaded", (await Page("orderBy=occurredAtUtc%20asc")).Items[0].Action);
+        Assert.Equal(["Deactivated", "Deleted", "Downloaded", "Downloaded", "Hidden", "Uploaded"],
+            (await Page("orderBy=action&pageSize=50")).Items.Select(x => x.Action));
+        Assert.Equal("Uploaded", (await Page("orderBy=action%20desc")).Items[0].Action);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{historyUrl}?orderBy=fileName")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest,
-            (await client.GetAsync($"{historyUrl}?orderBy=action,userId&lastKeyValue={Guid.NewGuid()}")).StatusCode);
+            (await client.GetAsync($"{historyUrl}?orderBy=userId,id&lastKeyValue={Guid.NewGuid()}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await client.GetAsync($"{historyUrl}?orderBy=action&lastKeyValue={Guid.NewGuid()}")).StatusCode);
 
         // Another tenant gets nothing about it.
         using var other = _factory.CreateClient();
