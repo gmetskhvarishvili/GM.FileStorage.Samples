@@ -197,8 +197,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// </summary>
     /// <remarks>
     /// What happened to the file, newest first: uploaded, downloaded, deleted, restored, each with who did it (user,
-    /// client, session, IP, user agent, correlation id). A download is recorded when the whole file, or a range from
-    /// its first byte, is opened; later ranges (seeking, resuming) aren't. A deleted file's history stays readable.
+    /// client, session, IP, user agent, correlation id). A deleted file's history stays readable.
     /// </remarks>
     /// <param name="id">The file's id</param>
     /// <param name="limit">At most this many entries, the newest (1 to 100, default 50)</param>
@@ -219,57 +218,20 @@ public class FilesController(UploadQuota quota) : BaseController
     /// Download File
     /// </summary>
     /// <remarks>
-    /// Streamed straight from storage, never buffered whole. Honours a single HTTP <c>Range</c> (<c>bytes=0-1023</c>,
-    /// <c>bytes=1024-</c>, <c>bytes=-500</c>) with <c>206 Partial Content</c>, so video players can seek and
-    /// downloads can resume; only the requested bytes are read from storage.
+    /// The whole file, streamed straight from storage, never buffered whole. A <c>Range</c> header is ignored: the
+    /// answer is always the whole file.
     /// </remarks>
     /// <param name="id">The file's id</param>
     /// <param name="cancellationToken"></param>
     [HttpGet("files/{id:guid}/content", Name = nameof(DownloadFile))]
     [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status206PartialContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status416RangeNotSatisfiable)]
     public async Task<IActionResult> DownloadFile(
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var query = new DownloadFileQuery { Id = id };
-        var requested = Request.GetTypedHeaders().Range;
-        // One range only; for several (rare), RFC 9110 lets us send the whole file instead.
-        if (requested is { Unit.Value: "bytes", Ranges.Count: 1 } && requested.Ranges.Single() is var r)
-        {
-            if (r.From is { } from)
-                query.Range = new FileByteRange(from, r.To is { } to ? to - from + 1 : null);
-            else
-                query.SuffixLength = r.To;
-        }
-
-        FileContentDto response;
-        try
-        {
-            response = await Mediator.Send(query, cancellationToken);
-        }
-        catch (FileRangeNotSatisfiableException ex)
-        {
-            Response.Headers.ContentRange = $"bytes */{ex.Size}";
-            return StatusCode(StatusCodes.Status416RangeNotSatisfiable);
-        }
-
-        Response.Headers.AcceptRanges = "bytes";
-        if (response.Range is not { } range)
-            return File(response.Content, response.ContentType, response.FileName);
-
-        await using (response.Content)
-        {
-            Response.StatusCode = StatusCodes.Status206PartialContent;
-            Response.ContentType = response.ContentType;
-            Response.ContentLength = range.Length;
-            Response.Headers.ContentRange = range.ToContentRange(response.Size);
-            await response.Content.CopyToAsync(Response.Body, cancellationToken);
-        }
-
-        return new EmptyResult();
+        var response = await Mediator.Send(new DownloadFileQuery { Id = id }, cancellationToken);
+        return File(response.Content, response.ContentType, response.FileName);
     }
 
     /// <summary>

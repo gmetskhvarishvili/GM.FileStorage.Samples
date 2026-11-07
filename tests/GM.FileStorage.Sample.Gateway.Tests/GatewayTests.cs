@@ -61,10 +61,7 @@ public sealed class GatewayTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync("/api/v1/files/6f1e0000-0000-0000-0000-000000000001")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/swagger/v1/swagger.json")).StatusCode);
 
-        // Range requests pass through both ways: the header in, the 206 out.
-        using var ranged = new HttpRequestMessage(HttpMethod.Get, "/api/v1/files/6f1e0000-0000-0000-0000-000000000001/content");
-        ranged.Headers.Range = new RangeHeaderValue(0, 99);
-        Assert.Equal(HttpStatusCode.PartialContent, (await client.SendAsync(ranged)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/files/6f1e0000-0000-0000-0000-000000000001/content")).StatusCode);
 
         var received = _api.Requests.ToArray();
         Assert.Equal(
@@ -79,7 +76,6 @@ public sealed class GatewayTests : IAsyncLifetime
             received.Select(r => $"{r.Method} {r.PathAndQuery}"));
         // Upload bodies arrive whole.
         Assert.All(received.Where(r => r.Method == "POST"), r => Assert.True(r.BodyLength > 0));
-        Assert.Equal("bytes=0-99", received[^1].Range);
         Assert.All(received, r => Assert.Equal(tenantId, r.TenantId));
     }
 
