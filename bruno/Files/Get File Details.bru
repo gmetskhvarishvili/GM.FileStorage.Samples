@@ -1,13 +1,22 @@
 meta {
   name: Get File Details
   type: http
-  seq: 6
+  seq: 4
 }
 
 get {
-  url: {{gateway}}/api/v1/files/{{fileId}}
+  url: {{gateway}}/api/v1/files/{{fileId}}?visibility=All
   body: none
   auth: none
+}
+
+params:query {
+  visibility: All
+}
+
+vars:pre-request {
+  fileId: e2888118-7116-4fbc-8e4b-c84934c48995
+  gateway: https://localhost:7141
 }
 
 tests {

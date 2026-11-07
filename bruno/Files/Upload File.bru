@@ -15,7 +15,11 @@ headers {
 }
 
 body:multipart-form {
-  file: @file(sample-files/passport.pdf)
+  file: @file(C:\Users\gmets\OneDrive\Desktop\Giorgi_Metskhvarishvili_CV.pdf) @contentType(application/pdf)
+}
+
+vars:pre-request {
+  gateway: https://localhost:7141
 }
 
 script:pre-request {

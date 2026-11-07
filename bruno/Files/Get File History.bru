@@ -1,27 +1,32 @@
 meta {
   name: Get File History
   type: http
-  seq: 13
+  seq: 5
 }
 
 get {
-  url: {{gateway}}/api/v1/files/{{fileId}}/history?pageSize=50
+  url: {{gateway}}/api/v1/files/{{fileId}}/history?pageSize=50&orderBy=occurredAtUtc asc
   body: none
   auth: none
 }
 
 params:query {
   pageSize: 50
+  orderBy: occurredAtUtc asc
   ~action: Downloaded
-  ~orderBy: occurredAtUtc asc
   ~userId: {{userId}}
+}
+
+vars:pre-request {
+  gateway: https://localhost:7141
+  fileId: 3e58cb60-8fd5-4fbd-8191-8607ac74cbc7
 }
 
 tests {
   test("returns 200", function () {
     expect(res.getStatus()).to.equal(200);
   });
-
+  
   test("lists what happened, newest first, with who did it", function () {
     const actions = res.getBody().map(e => e.action);
     expect(actions[0]).to.equal("Restored");

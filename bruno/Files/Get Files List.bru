@@ -1,7 +1,7 @@
 meta {
   name: Get Files List
   type: http
-  seq: 5
+  seq: 3
 }
 
 get {
@@ -19,6 +19,11 @@ params:query {
   ~integrityProblem: true
   ~visibility: All
   ~includeTotalCount: true
+}
+
+vars:pre-request {
+  gateway: https://localhost:7141
+  pageSize: 10
 }
 
 tests {
