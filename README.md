@@ -219,22 +219,22 @@ always queued for deletion in the `storage_cleanups` table.
 
 On, in the API's and the worker's appsettings.json (the worker's integrity check reads files back). The master key
 is a secret, so it lives in `appsecrets.json` with the other secrets, never in appsettings.json; without one,
-storage fails at first use instead of quietly writing plaintext. The template, `appsecrets.example.json`, comes
-with a random demo key (`local-dev`), and docker-compose passes the same one:
+storage fails at first use instead of quietly writing plaintext. The committed appsecrets.json files carry a demo key
+(`local-dev`); docker-compose passes its own:
 
 ```jsonc
-// appsecrets.json (gitignored)
+// appsecrets.json (committed, demo values)
 {
   "FileStorage": {
     "Encryption": {
       "ActiveKeyId": "local-dev",
-      "Keys": { "local-dev": "<base64 of 32 random bytes>" }
+      "Keys": { "local-dev": "4np4paalIZ479mKVwdxd61u5lXPXuhhO9zuZlHLvtMQ=" }
     }
   }
 }
 ```
 
-The template's key is public: it's committed. Anything beyond a local demo needs a key of your own,
+That demo key is public: it's committed. Anything beyond a local demo needs a key of your own,
 generated with `openssl rand -base64 32` and kept safe in your secrets store or password manager. Losing
 the key means losing every file it encrypted.
 
@@ -277,19 +277,24 @@ docker compose up -d postgres   # postgres:16 on localhost:5432, user postgres /
 ```
 
 The connection string lives in **`appsecrets.json`** of the API and of the worker, not in `appsettings.json`.
-Those files are gitignored. Create them from the committed templates, which hold the docker-compose database's
-demo credentials:
-
-```bash
-cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
-```
-
-```bash
-cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
-```
+They're committed with local demo values only: the docker-compose database's credentials and a demo master
+key. The cloud fields are empty. Put real keys in the secrets store named by `SECRETS_PROVIDER`, or in environment
+variables (`FileStorage__S3__AccessKey`, …), not in these files, so they never reach git. Both files hold:
 
 ```json
-{ "ConnectionStrings": { "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456" } }
+{
+  "ConnectionStrings": {
+    "ApplicationDatabase": "Host=localhost;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
+  },
+  "FileStorage": {
+    "Encryption": {
+      "ActiveKeyId": "local-dev",
+      "Keys": { "local-dev": "4np4paalIZ479mKVwdxd61u5lXPXuhhO9zuZlHLvtMQ=" }
+    },
+    "S3": { "AccessKey": "", "SecretKey": "" },
+    "AzureBlob": { "ConnectionString": "" }
+  }
+}
 ```
 
 The worker reads its own copy. These read the API's:
@@ -344,11 +349,12 @@ curl -H "$T" -H "$U" -X POST "https://localhost:7141/api/v1/files/6f1e…/restor
 
 The API also works on its own for a quick try. Abandoned uploads then wait in the queue until a worker runs.
 
-Files land under `FileStorage:Local:RootPath`, which is `../App_Data/file-storage`: the repository root's
-`App_Data` folder (gitignored), shared by the API and worker. To run on S3/MinIO
+Files land under `FileStorage:Local:RootPath`, which is `C:/Files`, shared by the API and worker (Docker uses its
+own volume instead). To run on S3/MinIO
 or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code change is needed.
 - **Non-secret settings** (bucket, region, container) go in `appsettings.json`.
-- **Credentials** go in `appsecrets.json`, where the template already has empty placeholders:
+- **Credentials** go in environment variables or the secrets store, or in `appsecrets.json` on your machine only
+  (don't commit them):
   - `FileStorage:S3:AccessKey` / `SecretKey`;
   - `FileStorage:AzureBlob:ConnectionString`.
 
@@ -397,7 +403,7 @@ Outside Docker, run ClamAV yourself and set `FileStorage:MalwareScanner:Enabled`
 ## Testing
 
 ```bash
-dotnet test   # with Postgres running and appsecrets.json in place (see Database setup)
+dotnet test   # with Postgres running (see Database setup)
 ```
 
 `FilesEndToEndTests` boot the API in-memory with `GmWebApplicationFactory<Program>` (GM.Testing.AspNetCore)

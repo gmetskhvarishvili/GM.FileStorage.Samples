@@ -11,22 +11,18 @@
 # workers' job lock all live there, shared by every instance. Two workers run to show it: only one cleans at a time.
 # Without Redis:ConnectionString (as with `dotnet run`) each service keeps them in memory, which suits one instance.
 #
-# Settings that live in appsecrets.json for `dotnet run` (the connection string, the link-signing key) come from
+# Settings that live in appsecrets.json for `dotnet run` (the connection string, the master key) come from
 # environment variables here, which GM.Secrets layers over appsettings.json the same way. They're the demo values
 # below; use your own anywhere real.
 #
-# For `dotnet run` instead, give the API and the worker their connection string in appsecrets.json (gitignored),
-# from the committed templates:
-#
-#   cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
-#   cp GM.FileStorage.Sample.Worker/appsecrets.example.json GM.FileStorage.Sample.Worker/appsecrets.json
+# For `dotnet run`, the committed appsecrets.json files hold the local demo values instead.
 
 x-app-environment: &app-environment
   ConnectionStrings__ApplicationDatabase: "Host=postgres;Port=5432;Database=GMFileStorageSample;Username=postgres;Password=123456"
   Redis__ConnectionString: redis:6379
   # The storage root the API and the workers share (the file-storage volume).
   FileStorage__Local__RootPath: /data/file-storage
-  # Encryption at rest (on in appsettings.json) with the demo master key from appsecrets.example.json. The worker
+  # Encryption at rest (on in appsettings.json) with a demo master key. The worker
   # needs it too: its integrity check reads files back.
   FileStorage__Encryption__ActiveKeyId: local-dev
   FileStorage__Encryption__Keys__local-dev: "zTNKRT/BO5nC28Ir8jpVIkI4kTY/Khl6/+NHiA94rDo="

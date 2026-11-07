@@ -9,8 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    # A real PostgreSQL so the end-to-end (WAF) tests actually run instead of no-opping. The connection
-    # string lives in appsecrets.json (gitignored), which the job creates from the committed template.
+    # A real PostgreSQL so the end-to-end (WAF) tests actually run instead of no-opping. The committed
+    # appsecrets.json points at it (localhost:5432, the demo credentials) and holds the demo master key.
     services:
       postgres:
         image: postgres:16-alpine
@@ -28,9 +28,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create appsecrets.json (connection string for the postgres service)
-        run: cp GM.FileStorage.Sample.API/appsecrets.example.json GM.FileStorage.Sample.API/appsecrets.json
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4

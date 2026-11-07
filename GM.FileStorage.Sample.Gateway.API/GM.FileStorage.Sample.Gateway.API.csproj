@@ -19,7 +19,7 @@
         <!-- Liveness/readiness endpoints for the edge, including a probe of the files API. -->
         <PackageReference Include="GM.HealthChecks" Version="1.0.2" />
         <!-- Swagger UI at the root, rendering the files API's OpenAPI document proxied through the gateway. -->
-        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.3.1" />
     </ItemGroup>
 
 </Project>

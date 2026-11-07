@@ -1,7 +1,7 @@
 meta {
   name: Upload Files
   type: http
-  seq: 3
+  seq: 2
 }
 
 post {
@@ -11,7 +11,11 @@ post {
 }
 
 body:multipart-form {
-  files: @file(sample-files/passport.pdf|sample-files/photo.png)
+  files: @file(C:\Users\gmets\OneDrive\Desktop\Giorgi_Metskhvarishvili_CV.pdf|C:\Users\gmets\OneDrive\Desktop\Giorgi_Metskhvarishvili_CV_Full.pdf) @contentType(multipart/mixed)
+}
+
+vars:pre-request {
+  gateway: https://localhost:7141
 }
 
 tests {

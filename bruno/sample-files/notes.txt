@@ -1,1 +1,0 @@
-Plain text isn't an allowed type.

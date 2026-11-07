@@ -1,7 +1,7 @@
 meta {
   name: Restore File
   type: http
-  seq: 12
+  seq: 8
 }
 
 post {
@@ -12,6 +12,11 @@ post {
 
 body:json {
   {}
+}
+
+vars:pre-request {
+  fileId: 968222ff-3003-4564-9ed7-c2e17f12e6b8
+  gateway: https://localhost:7141
 }
 
 tests {

@@ -1,13 +1,18 @@
 meta {
   name: Delete File
   type: http
-  seq: 10
+  seq: 7
 }
 
 delete {
   url: {{gateway}}/api/v1/files/{{fileId}}
   body: none
   auth: none
+}
+
+vars:pre-request {
+  fileId: 968222ff-3003-4564-9ed7-c2e17f12e6b8
+  gateway: https://localhost:7141
 }
 
 tests {

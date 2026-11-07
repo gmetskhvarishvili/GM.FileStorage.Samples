@@ -54,7 +54,7 @@ flowchart LR
 - **The worker holds no HTTP surface.** It reads the `storage_cleanups` queue and deletes the bytes that
   nothing points at any more.
 - **The API and worker must see the same storage.** Both read `FileStorage:*`. Locally that's the shared
-  `App_Data/file-storage` folder at the repository root; in the cloud it's the same bucket or container.
+  `C:/Files` folder; in the cloud it's the same bucket or container.
 
 ## Layers — dependency graph
 

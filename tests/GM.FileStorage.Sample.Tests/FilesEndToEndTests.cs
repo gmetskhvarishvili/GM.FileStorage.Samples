@@ -45,6 +45,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
     public FilesEndToEndTests() =>
         _factory = new GmWebApplicationFactory<Program>()
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout);
 
@@ -407,6 +410,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         // Same storage root and key template as the other tests, with a limit of 3 files a minute.
         await using var factory = new GmWebApplicationFactory<Program>()
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
@@ -436,6 +442,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         // A limit of 3 files a minute shows that a replayed retry doesn't count as another file.
         await using var factory = new GmWebApplicationFactory<Program>()
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
@@ -568,6 +577,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
 
         // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
         await using var factory = new GmWebApplicationFactory<Program>()
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("Quotas:BytesPerTenant", "40");
@@ -607,6 +619,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var port = ((IPEndPoint)nobody.LocalEndpoint).Port;
         nobody.Stop();
         await using var factory = new GmWebApplicationFactory<Program>()
+            // Local disk whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("FileStorage:MalwareScanner:Enabled", "true")
@@ -653,6 +667,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         // bytes the API has read by the time it starts answering.
         var bodyRead = new BodyReadCounter();
         await using var factory = new GmWebApplicationFactory<Program>()
+            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
+            .WithConfig("FileStorage:Provider", "Local")
+            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
             .WithConfig("FileStorage:Local:RootPath", _root)
             .WithConfig("FileStorage:KeyTemplate", Layout)
             .WithConfig("FileStorage:MaxFileSize", limit.ToString(System.Globalization.CultureInfo.InvariantCulture))

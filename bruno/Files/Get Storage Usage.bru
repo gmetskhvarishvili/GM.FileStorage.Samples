@@ -1,13 +1,17 @@
 meta {
   name: Get Storage Usage
   type: http
-  seq: 8
+  seq: 9
 }
 
 get {
   url: {{gateway}}/api/v1/files/usage
   body: none
   auth: none
+}
+
+vars:pre-request {
+  gateway: https://localhost:7141
 }
 
 tests {
