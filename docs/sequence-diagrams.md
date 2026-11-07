@@ -104,7 +104,7 @@ sequenceDiagram
     C->>API: multipart body (still arriving)
     API->>API: read up to the first file part (MultipartFiles, no buffering)
     API->>API: validate (file name, content type), tenant from X-Tenant-Id or public
-    API->>API: new file id, storage key from KeyTemplate on it<br/>9f/9f1c…
+    API->>API: new file id, storage key from KeyTemplate on it<br/>tenant/2026/11/07/9f1c…
     API->>DB: insert storage_cleanups (key, due in 15 min)
     API->>S: UploadAsync (the part's stream, straight off the request)
     S->>S: check allowed type and bytes from the first bytes,<br/>count size as it streams

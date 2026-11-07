@@ -96,7 +96,7 @@ its deletes would miss the API's files and the queue would back off forever.
 
 ```jsonc
 "FileStorage": {
-  "KeyTemplate": "{shard}/{id}"   // file 9f1c… → 9f/9f1c…: nothing about the file in the path
+  "KeyTemplate": "{meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}"   // → <tenant>/2026/11/07/9f1c…
 }
 ```
 

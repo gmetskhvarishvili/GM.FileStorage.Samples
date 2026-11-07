@@ -153,26 +153,42 @@ flowchart LR
 ## Storage layout
 
 A file is identified by a GUID, for example `9f1cb2d4-…`. Where its bytes are stored is its **storage key**,
-made from `FileStorage:KeyTemplate` in appsettings.json and built on that id, with no code involved:
+made from `FileStorage:KeyTemplate` in appsettings.json and built on that id:
 
 ```jsonc
-"KeyTemplate": "{shard}/{id}"   // file 9f1cb2d4-… → 9f/9f1cb2d4…
+"KeyTemplate": "{meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}"
+// tenant 3f2b9c1e-…, uploaded 7 Nov 2026 → 3f2b9c1e-…/2026/11/07/9f1cb2d4…
 ```
 
-The storage key never leaves the API: callers only ever use the id. And the key says nothing about the file:
+```
+file-storage/
+├── 3f2b9c1e-5d4a-4e7b-9a1c-2b8d6e0f4a71/   a tenant (the shared space is public/)
+│   ├── 2025/12/31/…
+│   └── 2026/11/07/
+│       ├── 9f1cb2d4…              the bytes, encrypted
+│       └── 9f1cb2d4….gmmeta       the Local provider's sidecar: placeholders and the sealed details
+└── public/
+    └── 2026/11/07/…
+```
 
+The storage key never leaves the API: callers only ever use the id.
+
+- **Easy to find by tenant and date.** One tenant's files of one year, month or day are one folder (one prefix in a
+  bucket), so they can be sized up, copied, or given a lifecycle rule (e.g. "move `*/2025/` to cold storage")
+  without asking the database.
 - **No type, no name.** No `{category}` folder and no `{ext}`: someone browsing the bucket or the disk can't
   tell a passport scan from a video. Together with encryption at rest (below), what's stored is an unreadable
-  object named by an id, and the only way to the file is through the API.
-- **`{shard}` spreads files out.** It's the first two characters of `{id}`, so files spread over 256
-  folders and no folder grows huge.
+  object named by an id, and the only way to open it is through the API. The path does show the tenant id and the
+  upload date (UTC); nothing else about the file.
+- **`{meta:tenantId}` is the caller's tenant.** The upload hands it to the key strategy only; the stored object's
+  own metadata still carries nothing identifying.
 - **`{id}` is the file's id.** The sample picks the id first and hands it to the key strategy
   (`FileKeyContext.Id`); `{id}` is required, so storage keys never collide.
-- **Nothing identifying.** Tenant, user and date stay out of the path, and out of the object's metadata. They're
-  columns in the catalog, which is how files are found.
-- **Other layouts are a config change**, if hiding the type matters less than browsing storage by it:
-  `{category}/{shard}/{id}{ext}` gives `documents/9f/9f1c….pdf`, `{date:yyyy/MM}/{id}{ext}` date folders. The
-  template is checked at startup, so a typo fails fast.
+- **Each file keeps the key it was stored under** (it's on its row), so files stored under an earlier layout, such
+  as `{shard}/{id}`, stay where they are and keep working.
+- **Other layouts are a config change**: `{shard}/{id}` shows nothing at all (the first two characters of the id,
+  spreading files over 256 folders); `{category}/{shard}/{id}{ext}` gives `documents/9f/9f1c….pdf`. The template
+  is checked at startup, so a typo fails fast.
 
 
 ## Keeping storage and the database in step
