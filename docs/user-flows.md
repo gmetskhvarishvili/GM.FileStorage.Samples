@@ -48,14 +48,7 @@ title: Gateway checks — user flow
 flowchart TD
     req([Request to :7141]) --> route{Matches a route?}
     route -- no --> nf404[404 Not Found]
-    route -- yes --> signin{A file route?}
-    signin -- no, /swagger/** --> policy
-    signin -- yes --> token{GM.Identity token<br/>with a live session?}
-    token -- no --> r401[401 Unauthorized]
-    token -- yes --> tenant{X-Tenant-Id names another<br/>tenant than the session's?}
-    tenant -- yes --> r403[403 Forbidden]
-    tenant -- no --> actor[Caller's X-User-Id, X-Tenant-Id, …<br/>set from the session]
-    actor --> policy{Which policy?}
+    route -- yes --> policy{Which policy?}
     policy -- POST /files or /files/batch --> up{Under 30 uploads<br/>this minute for this IP?}
     policy -- other /files routes --> api{Under 300 requests<br/>this minute for this IP?}
     policy -- /swagger/** --> fwd
@@ -69,8 +62,7 @@ flowchart TD
 ```
 
 Bodies over 60 MB are refused (`413`) by the gateway and by the API. A batch counts as one upload, however many
-files it holds. With `Authentication:Enabled=false`, the sign-in checks are skipped and the actor headers pass
-through as sent.
+files it holds. The actor headers (`X-Tenant-Id`, `X-User-Id`) pass through as sent.
 
 ## Upload — user flow
 
@@ -210,7 +202,7 @@ flowchart TD
     owned -- yes --> list[200 newest first: Uploaded, Downloaded,<br/>Deleted, Restored, … with who did it]
 ```
 
-Each entry carries the caller's user, client and session (from their sign-in), IP address, user agent and
+Each entry carries the caller's user, client and session (from the actor headers), IP address, user agent and
 correlation id.
 
 ## Delete — user flow

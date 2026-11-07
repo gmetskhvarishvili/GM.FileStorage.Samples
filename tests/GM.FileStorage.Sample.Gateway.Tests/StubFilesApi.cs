@@ -21,8 +21,7 @@ public sealed class StubFilesApi : IAsyncDisposable
     private WebApplication? _app;
 
     /// <summary>One request the stub received.</summary>
-    public sealed record Received(string Method, string PathAndQuery, long BodyLength, string? Range, string? TenantId,
-        string? UserId = null, string? ClientId = null, string? SessionId = null);
+    public sealed record Received(string Method, string PathAndQuery, long BodyLength, string? Range, string? TenantId);
 
     public ConcurrentQueue<Received> Requests { get; } = new();
 
@@ -43,8 +42,7 @@ public sealed class StubFilesApi : IAsyncDisposable
             await context.Request.Body.CopyToAsync(body);
             var range = context.Request.Headers.Range.FirstOrDefault();
             var received = new Received(context.Request.Method, context.Request.Path + context.Request.QueryString, body.Length, range,
-                context.Request.Headers["X-Tenant-Id"].FirstOrDefault(), context.Request.Headers["X-User-Id"].FirstOrDefault(),
-                context.Request.Headers["X-Client-Id"].FirstOrDefault(), context.Request.Headers["X-Session-Id"].FirstOrDefault());
+                context.Request.Headers["X-Tenant-Id"].FirstOrDefault());
             Requests.Enqueue(received);
 
             // A ranged request gets a 206, as the API answers one.
