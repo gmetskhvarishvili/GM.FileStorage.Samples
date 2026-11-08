@@ -5,8 +5,8 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditA
 /// <summary>
 /// The audit-log aggregate: a read-only projection of one persisted domain event, including the actor/request
 /// metadata stamped by the auditing context. Mapped read-only (a keyless view over the domain-events table —
-/// the log is append-only, owned by the persistence layer) and queried with specifications, such as a file's
-/// history (<c>StoredFileHistorySpecification</c>).
+/// the log is append-only, owned by the persistence layer) and queried with <c>DomainEventLogSpecification</c>,
+/// e.g. for a file's history.
 /// </summary>
 public class DomainEventLog
 {

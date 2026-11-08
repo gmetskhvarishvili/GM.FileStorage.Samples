@@ -314,5 +314,5 @@ classDiagram
 
 `StorageCleanup` names a storage key, not a file, so it has no link to `StoredFile`. The job checks at run time
 whether any file still uses the key. `DomainEventLog` (the audit bounded context) is a read-only, keyless view over
-the domain-event log; a file's history is `StoredFileHistorySpecification` over it, matched by the file's aggregate
+the domain-event log; a file's history is `DomainEventLogSpecification` over it, matched by the file's aggregate
 type and id.
