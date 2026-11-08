@@ -23,7 +23,17 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration configuration)
     {
-        AddFileStorage(services, configuration);
+        // One call registers every GM.FileStorage package this project references whose FileStorage settings are present:
+        // - the Local, S3 and Azure backends (their sections are in appsettings.json). FileStorage:Provider (default "Local")
+        //   decides which one IFileStorageService resolves to — swapping storage is a config change, not a code change.
+        //   The S3 and Azure clients are only constructed when their provider is selected, so the sample runs on disk out
+        //   of the box with no cloud config.
+        // - encryption at rest (FileStorage:Encryption:Enabled, master keys from secrets): every file encrypted with its
+        //   own AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
+        // - malware scanning with ClamAV (off unless FileStorage:MalwareScanner:Enabled), after encryption, so it sees the
+        //   plaintext: an infected upload is refused, and so is one ClamAV can't answer for.
+        // Generated storage keys follow FileStorage:KeyTemplate ({meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}).
+        services.AddGMFileStorage(configuration);
 
         // Bytes each tenant may store (Quotas:BytesPerTenant).
         services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
@@ -53,9 +63,9 @@ public static class DependencyInjection
     public static IServiceCollection AddWorkerInfrastructure(
         this IServiceCollection services, IConfiguration configuration)
     {
-        // When scanning is on, the integrity check also rescans what it reads, catching files that match signatures
-        // added since they were uploaded.
-        AddFileStorage(services, configuration);
+        // The same storage, encryption and scanning as the API (see AddInfrastructure). When scanning is on, the integrity
+        // check also rescans what it reads, catching files that match signatures added since they were uploaded.
+        services.AddGMFileStorage(configuration);
 
         // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
         // configured) so several workers never clean at the same time.
@@ -86,17 +96,4 @@ public static class DependencyInjection
         services.AddGMRedisDistributedLock(configuration);
         return true;
     }
-
-    // One call registers every GM.FileStorage package this project references whose FileStorage settings are present:
-    // - the Local, S3 and Azure backends (their sections are in appsettings.json). FileStorage:Provider (default "Local")
-    //   decides which one IFileStorageService resolves to — swapping storage is a config change, not a code change. The
-    //   S3 and Azure clients are only constructed when their provider is selected, so the sample runs on disk out of
-    //   the box with no cloud config.
-    // - encryption at rest (FileStorage:Encryption:Enabled, master keys from secrets): every file encrypted with its own
-    //   AES-256-GCM key, wrapped by FileStorage:Encryption:Keys[ActiveKeyId].
-    // - malware scanning with ClamAV (off unless FileStorage:MalwareScanner:Enabled), after encryption, so it sees the
-    //   plaintext: an infected upload is refused, and so is one ClamAV can't answer for.
-    // Generated storage keys follow FileStorage:KeyTemplate ({meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}).
-    private static void AddFileStorage(IServiceCollection services, IConfiguration configuration) =>
-        services.AddGMFileStorage(configuration);
 }
