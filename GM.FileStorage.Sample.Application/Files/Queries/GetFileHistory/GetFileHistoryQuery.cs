@@ -5,7 +5,8 @@ using GM.EntityFramework.Domain.Specifications;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
+using GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Specifications;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -112,16 +113,19 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         if (!paging.IsKeysetPaging)
             order += ", Id desc";
 
-        StoredFileHistorySpecification Specification(PagingOptions pagingOptions, OrderingOptions ordering) =>
-            new(request.Id, request.Action, request.UserId, request.ClientId, request.SessionId, request.IpAddress,
-                dateRange, pagingOptions, ordering);
+        var eventTypes = EventTypesOf(request.Action);
+
+        // The file's own entries in the log.
+        DomainEventLogSpecification Specification(PagingOptions pagingOptions, OrderingOptions ordering) =>
+            new(nameof(StoredFile), request.Id.ToString(), eventTypes, request.UserId, request.ClientId,
+                request.SessionId, request.IpAddress, dateRange, pagingOptions, ordering);
 
         long? totalCount = paging.IncludeTotalCount
-            ? await unitOfWork.StoredFileRepository.CountHistoryAsync(
+            ? await unitOfWork.DomainEventLogRepository.CountAsync(
                 Specification(PagingOptions.None, OrderingOptions.None), cancellationToken)
             : null;
 
-        var events = await unitOfWork.StoredFileRepository.ListHistoryAsync(
+        var events = await unitOfWork.DomainEventLogRepository.ListAsync(
             Specification(paging, new OrderingOptions { OrderBy = order }), cancellationToken);
 
         var items = events.Select(e => new FileHistoryEntryDto
@@ -138,6 +142,17 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         }).ToList();
 
         return request.ToPagedListDto(events, items, totalCount);
+    }
+
+    // An action's event types: GM.FileStorage's GMStoredFile{Action}DomainEvent (uploaded, deleted, …) or the sample's
+    // StoredFile{Action}DomainEvent (downloaded).
+    private static string[]? EventTypesOf(string? action)
+    {
+        if (string.IsNullOrWhiteSpace(action))
+            return null;
+
+        var name = char.ToUpperInvariant(action.Trim()[0]) + action.Trim()[1..];
+        return [$"GMStoredFile{name}DomainEvent", $"StoredFile{name}DomainEvent"];
     }
 
     // GMStoredFileUploadedDomainEvent -> Uploaded, StoredFileDownloadedDomainEvent -> Downloaded.
