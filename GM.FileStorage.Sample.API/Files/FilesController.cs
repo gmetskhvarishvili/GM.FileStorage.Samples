@@ -2,7 +2,6 @@ using Asp.Versioning;
 using GM.API.Controllers;
 using GM.API.Models;
 using GM.Exceptions;
-using GM.FileStorage.Sample.API.Files.Multipart;
 using GM.FileStorage.Sample.Application.Files.Commands.DeleteFile;
 using GM.FileStorage.Sample.Application.Files.Commands.DiscardFiles;
 using GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
@@ -40,8 +39,6 @@ namespace GM.FileStorage.Sample.API.Files;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}")]
-[TooManyUploads]
-[ScanUnavailable]
 public class FilesController(UploadQuota quota) : BaseController
 {
     /// <summary>
@@ -69,7 +66,7 @@ public class FilesController(UploadQuota quota) : BaseController
         await using var files = MultipartFiles.ReadAsync(Request, cancellationToken).GetAsyncEnumerator(cancellationToken);
         if (!await files.MoveNextAsync())
             throw new BadRequestException("No file was sent.");
-        await quota.TakeAsync(HttpContext, cancellationToken);
+        await quota.TakeAsync(cancellationToken);
 
         var command = new UploadFileCommand
         {
@@ -127,7 +124,7 @@ public class FilesController(UploadQuota quota) : BaseController
         var command = new UploadFilesCommand
         {
             // Each file takes an upload permit as it arrives; past the limit the batch is refused whole.
-            Files = quota.CountAsync(MultipartFiles.ReadAsync(Request, cancellationToken), HttpContext, cancellationToken),
+            Files = quota.CountAsync(MultipartFiles.ReadAsync(Request, cancellationToken), cancellationToken),
         };
 
         var response = await Mediator.Send(command, cancellationToken);

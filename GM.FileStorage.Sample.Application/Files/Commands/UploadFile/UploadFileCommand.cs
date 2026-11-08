@@ -59,6 +59,9 @@ public class UploadFileCommandHandler(
     ICurrentActor actor, StoredFileCatalog<StoredFile, StorageCleanup> catalog)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
+    // How long a client is told to wait (Retry-After) when the malware scanner can't answer.
+    private static readonly TimeSpan ScanRetryAfter = TimeSpan.FromSeconds(30);
+
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
     {
         // The caller's tenant, recorded on the file (the uploader is the audit column CreatedBy). The stored object
@@ -104,6 +107,12 @@ public class UploadFileCommandHandler(
         {
             await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
             throw new BadRequestException(ex.Message);
+        }
+        catch (MalwareScanFailedException)
+        {
+            await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
+            throw new ServiceUnavailableException(
+                "Malware scanning is on, but the scanner didn't answer. Nothing was kept; try again shortly.", ScanRetryAfter);
         }
         catch
         {

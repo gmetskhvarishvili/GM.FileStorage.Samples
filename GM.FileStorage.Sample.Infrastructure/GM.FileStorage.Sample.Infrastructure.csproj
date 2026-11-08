@@ -29,8 +29,8 @@
         <PackageReference Include="GM.Caching" Version="1.0.1" />
         <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
         <!-- Counts uploaded files per client. -->
-        <PackageReference Include="GM.RateLimiting" Version="1.0.1" />
-        <PackageReference Include="GM.RateLimiting.Redis" Version="1.0.1" />
+        <PackageReference Include="GM.RateLimiting" Version="1.1.0" />
+        <PackageReference Include="GM.RateLimiting.Redis" Version="1.1.0" />
     </ItemGroup>
 
 </Project>
