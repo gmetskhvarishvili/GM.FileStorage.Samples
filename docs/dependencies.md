@@ -299,6 +299,17 @@ classDiagram
     class IStorageCleanupRepository {
         <<interface>>
     }
+    class DomainEventLog {
+        <<read-only view>>
+        +string AggregateType
+        +string AggregateId
+        +string EventType
+        +Guid? UserId
+        +DateTime CreatedAt
+    }
+    class IDomainEventLogRepository {
+        <<interface>>
+    }
 
     GMStoredFile <|-- StoredFile
     GMStorageCleanup <|-- StorageCleanup
@@ -306,8 +317,12 @@ classDiagram
     IUnitOfWork --> IStorageCleanupRepository
     IStoredFileRepository ..> StoredFile
     IStorageCleanupRepository ..> StorageCleanup
+    IUnitOfWork --> IDomainEventLogRepository
+    IDomainEventLogRepository ..> DomainEventLog
 ```
 
 `StoredFile` and `StorageCleanup` hold only their constructors and `Create`; everything else is in the GM.FileStorage
 bases. `StorageCleanup` names a storage key, not a file, so it has no link to `StoredFile`. The job checks at run time
-whether any file still uses the key.
+whether any file still uses the key. `DomainEventLog` (the audit bounded context) is a read-only, keyless view over
+the domain-event log; a file's history is `DomainEventLogSpecification` over it, matched by the file's aggregate
+type and id.
