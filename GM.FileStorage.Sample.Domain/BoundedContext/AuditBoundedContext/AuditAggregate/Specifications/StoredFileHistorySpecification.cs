@@ -1,14 +1,14 @@
-using GM.EntityFramework.Domain.Events;
 using GM.EntityFramework.Domain.Specifications;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using System;
 
-namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
+namespace GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Specifications;
 
 /// <summary>
 /// One file's entries in the domain-event log (uploaded, downloaded, deleted, restored, …), filtered by what happened
 /// and who did it, then ordered and paged like any list.
 /// </summary>
-public class StoredFileHistorySpecification : BaseSpecification<StoredDomainEvent>
+public class StoredFileHistorySpecification : BaseSpecification<DomainEventLog>
 {
     public StoredFileHistorySpecification(Guid storedFileId, string? action, Guid? userId, Guid? clientId,
         Guid? sessionId, string? ipAddress, AuditDateRange dateRange, PagingOptions paging, OrderingOptions ordering)

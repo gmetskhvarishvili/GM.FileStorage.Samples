@@ -5,7 +5,7 @@ using GM.EntityFramework.Domain.Specifications;
 using GM.Exceptions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
+using GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Specifications;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using Microsoft.EntityFrameworkCore;
@@ -117,11 +117,11 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
                 dateRange, pagingOptions, ordering);
 
         long? totalCount = paging.IncludeTotalCount
-            ? await unitOfWork.StoredFileRepository.CountHistoryAsync(
+            ? await unitOfWork.DomainEventLogRepository.CountAsync(
                 Specification(PagingOptions.None, OrderingOptions.None), cancellationToken)
             : null;
 
-        var events = await unitOfWork.StoredFileRepository.ListHistoryAsync(
+        var events = await unitOfWork.DomainEventLogRepository.ListAsync(
             Specification(paging, new OrderingOptions { OrderBy = order }), cancellationToken);
 
         var items = events.Select(e => new FileHistoryEntryDto
