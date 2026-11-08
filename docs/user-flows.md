@@ -160,7 +160,7 @@ flowchart TD
     guid -- no --> n404[404 no such route]
     guid -- yes --> exists{Your tenant's file, and visible?<br/>deleted only with visibility=All}
     exists -- no --> f404[404 StoredFile not found]
-    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>tenantId, uploadedBy, audit dates]
+    exists -- yes --> ok[200 details:<br/>name, size, checksum,<br/>tenantId, createdBy, audit dates]
 ```
 
 ## Download — user flow

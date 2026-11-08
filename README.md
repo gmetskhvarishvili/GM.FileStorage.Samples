@@ -136,7 +136,7 @@ flowchart LR
   gateway doesn't sign callers in: it passes the headers through as sent, so it's not a security boundary on its own.
   Put sign-in in front of it (with GM.Identity, its gateway's `AddGMActorForwarding()` sets them from the token).
 - **Tenant and uploader are columns.** `tenant_id` (indexed) scopes every query; the uploader is GM's audit
-  column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `uploadedBy`. The list
+  column `created_by`, filled from `X-User-Id`, and responses show both as `tenantId` and `createdBy`. The list
   filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
   There's no metadata table: GM.FileStorage's name/value metadata (`GMStoredFile<TStoredFile, TStoredFileMetadata>`)
   is for labels that vary from file to file, which this sample doesn't take.

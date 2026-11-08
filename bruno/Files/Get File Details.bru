@@ -28,7 +28,7 @@ tests {
     const body = res.getBody();
     expect(body.id).to.equal(bru.getEnvVar("fileId"));
     expect(body.tenantId).to.equal(bru.getEnvVar("tenantId"));
-    expect(body.uploadedBy).to.equal(bru.getEnvVar("userId"));
+    expect(body.createdBy).to.equal(bru.getEnvVar("userId"));
   });
 }
 

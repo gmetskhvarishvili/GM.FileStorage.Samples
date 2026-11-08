@@ -1,11 +1,7 @@
 using GM.API.Application.Models;
-using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
-using GM.FileStorage.Sample.Application.Files.Queries.GetFilesList;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using Mapster;
 using System;
 using System.Globalization;
-using System.Linq;
 
 namespace GM.FileStorage.Sample.Application.Common;
 
@@ -25,11 +21,5 @@ public class MappingRegister : IRegister
             .MapWith(src => src.HasValue
                 ? src.Value.ToString(AuditableDto.DateTimeFormat, CultureInfo.InvariantCulture)
                 : null);
-
-        // The uploader is the audit column CreatedBy (their X-User-Id).
-        config.NewConfig<StoredFile, StoredFileDto>()
-            .Map(dest => dest.UploadedBy, src => src.CreatedBy);
-        config.NewConfig<StoredFile, StoredFileDetailsDto>()
-            .Map(dest => dest.UploadedBy, src => src.CreatedBy);
     }
 }
