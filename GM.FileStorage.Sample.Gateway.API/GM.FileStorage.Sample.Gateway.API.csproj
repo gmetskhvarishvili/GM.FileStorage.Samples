@@ -15,7 +15,7 @@
         <!-- Redis variants: rate-limit counts shared by every gateway instance (Redis:ConnectionString). -->
         <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
         <PackageReference Include="GM.DistributedLock.Redis" Version="1.0.2" />
-        <PackageReference Include="GM.RateLimiting.Redis" Version="1.0.1" />
+        <PackageReference Include="GM.RateLimiting.Redis" Version="1.1.0" />
         <!-- Liveness/readiness endpoints for the edge, including a probe of the files API. -->
         <PackageReference Include="GM.HealthChecks" Version="1.0.2" />
         <!-- Swagger UI at the root, rendering the files API's OpenAPI document proxied through the gateway. -->

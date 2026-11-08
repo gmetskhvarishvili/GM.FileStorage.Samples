@@ -7,7 +7,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="GM.Exceptions" Version="1.2.2" />
+        <PackageReference Include="GM.Exceptions" Version="1.3.0" />
     </ItemGroup>
 
     <!-- Microsoft.Extensions.Localization.Abstractions ships in the ASP.NET Core shared framework. -->

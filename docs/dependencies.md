@@ -247,7 +247,7 @@ classDiagram
 Delete, list and details touch only the catalog. Restore asks storage too, to check the bytes are still there.
 The batch handler touches neither: it sends one `UploadFileCommand` per file back through the mediator, so each
 file gets the same validation, rules and ordering as a single upload. Uploads never bind an `IFormFile`: the
-controller reads file parts straight off the request with `MultipartFiles`, and `DiscardFilesCommand` (not exposed
+controller reads file parts straight off the request with GM.API's `MultipartFiles`, and `DiscardFilesCommand` (not exposed
 over HTTP) undoes files stored by a request that's then refused.
 
 ## Domain model — class diagram

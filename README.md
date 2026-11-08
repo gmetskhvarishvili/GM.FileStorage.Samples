@@ -81,9 +81,8 @@ flowchart LR
   storage never keeps unreferenced objects.
 - **Uploads stream, never buffer.** The upload endpoints take no `IFormFile` (binding one makes ASP.NET buffer the
   whole form, to disk past 64 KB, before any code runs). They read file parts straight off the request
-  (`Files/Multipart/MultipartFiles`) into storage, so a file over `FileStorage:MaxFileSize` is cut off as soon as
-  it passes the limit, without reading the rest. Swagger still shows the file pickers
-  (`MultipartUploadOperationFilter`).
+  (GM.API's `MultipartFiles` and `[StreamedMultipartUpload]`) into storage, so a file over `FileStorage:MaxFileSize` is
+  cut off as soon as it passes the limit, without reading the rest. Swagger still shows the file pickers.
 - **Batch uploads.** `POST /files/batch` takes up to 20 files and stores each as a single upload would (its own
   id, rules and transaction), answering with one result per file. A file that fails doesn't stop the rest, so a
   client resends only the failed ones.
