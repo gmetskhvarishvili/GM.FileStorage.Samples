@@ -1,51 +1,22 @@
 using GM.EntityFramework.Domain.Abstractions;
-using GM.EntityFramework.Domain.Base;
+using GM.FileStorage.Domain.FileStorage.StorageCleanupAggregate.Entities;
 using System;
 
 namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 
 /// <summary>
-/// A storage object that must be deleted once <see cref="DueAtUtc"/> passes, unless a stored file (live or deleted)
-/// still points at it. Queued before an upload, for its new storage key, due after
-/// <see cref="PendingUploadGracePeriod"/>, and removed again in the transaction that records the upload. So an upload
-/// that crashes or fails after storing its bytes never leaves them behind for good: the storage-cleanup job deletes
-/// them once the entry falls due.
-/// Deleting a file queues nothing: it only marks the row deleted and keeps the bytes, so it can be restored.
+/// The sample's storage-cleanup aggregate root: a storage object to delete once it falls due, unless a stored file
+/// (live or deleted) still points at it. Its behaviour lives in the GM.FileStorage base <see cref="GMStorageCleanup"/>.
+/// Queued before an upload and removed in the transaction that records it, so an upload that fails after storing its
+/// bytes never leaves them behind for good. Deleting a file queues nothing: it keeps the bytes, so it can be restored.
 /// </summary>
-public class StorageCleanup : Entity<Guid>, IAggregateRoot
+public class StorageCleanup : GMStorageCleanup, IAggregateRoot
 {
-    /// <summary>How long an upload may take before its bytes count as abandoned.</summary>
-    public static readonly TimeSpan PendingUploadGracePeriod = TimeSpan.FromMinutes(15);
-
     private StorageCleanup() { } // EF Core materialization
 
-    private StorageCleanup(string storageKey, DateTime dueAtUtc)
+    private StorageCleanup(string storageKey, DateTime dueAtUtc) : base(storageKey, dueAtUtc)
     {
-        Id = Guid.NewGuid();
-        StorageKey = storageKey;
-        DueAtUtc = dueAtUtc;
     }
-
-    /// <summary>The storage object to delete.</summary>
-    public string StorageKey { get; private set; } = null!;
-
-    /// <summary>When it may be deleted (UTC).</summary>
-    public DateTime DueAtUtc { get; private set; }
-
-    /// <summary>Delete attempts so far.</summary>
-    public int Attempts { get; private set; }
 
     public static StorageCleanup Create(string storageKey, DateTime dueAtUtc) => new(storageKey, dueAtUtc);
-
-    /// <summary>
-    /// Takes this entry before deleting its bytes: moves <see cref="DueAtUtc"/> out by a backoff (1, 2, 4 … minutes,
-    /// at most an hour), so if the delete fails the entry waits before its next try. <see cref="DueAtUtc"/> is a
-    /// concurrency token, so once this is saved an upload still holding the entry can no longer record its bytes
-    /// as live, and two cleaners can't both take it.
-    /// </summary>
-    public void Claim(DateTime nowUtc)
-    {
-        Attempts++;
-        DueAtUtc = nowUtc.AddMinutes(Math.Min(60, Math.Pow(2, Attempts - 1)));
-    }
 }

@@ -37,13 +37,13 @@ public class GetFileHistoryQuery : GetBaseListQuery, IRequest<PagedListDto<FileH
 
     /// <summary>
     /// The fields <see cref="GetBaseListQuery.OrderBy"/> may name, and what they sort the log by. An action sorts by its
-    /// event type without GM.FileStorage's "GM" prefix, so Downloaded comes before Uploaded whichever library raised it.
+    /// event type, all GM.FileStorage's GMStoredFile{Action}DomainEvent, so in the order of the action's name.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> OrderFields =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["id"] = "Id",
-            ["action"] = "EventType.Replace(\"GMStoredFile\", \"StoredFile\")",
+            ["action"] = "EventType",
             ["occurredAtUtc"] = "OccurredOn",
             ["userId"] = "UserId",
             ["clientId"] = "ClientId",
@@ -113,11 +113,11 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         if (!paging.IsKeysetPaging)
             order += ", Id desc";
 
-        var eventTypes = EventTypesOf(request.Action);
+        var eventType = EventTypeOf(request.Action);
 
         // The file's own entries in the log.
         DomainEventLogSpecification Specification(PagingOptions pagingOptions, OrderingOptions ordering) =>
-            new(nameof(StoredFile), request.Id.ToString(), eventTypes, request.UserId, request.ClientId,
+            new(nameof(StoredFile), request.Id.ToString(), eventType, request.UserId, request.ClientId,
                 request.SessionId, request.IpAddress, dateRange, pagingOptions, ordering);
 
         long? totalCount = paging.IncludeTotalCount
@@ -144,30 +144,22 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         return request.ToPagedListDto(events, items, totalCount);
     }
 
-    // An action's event types: GM.FileStorage's GMStoredFile{Action}DomainEvent (uploaded, deleted, …) or the sample's
-    // StoredFile{Action}DomainEvent (downloaded).
-    private static string[]? EventTypesOf(string? action)
+    // An action's event type: GM.FileStorage's GMStoredFile{Action}DomainEvent.
+    private static string? EventTypeOf(string? action)
     {
         if (string.IsNullOrWhiteSpace(action))
             return null;
 
         var name = char.ToUpperInvariant(action.Trim()[0]) + action.Trim()[1..];
-        return [$"GMStoredFile{name}DomainEvent", $"StoredFile{name}DomainEvent"];
+        return $"GMStoredFile{name}DomainEvent";
     }
 
-    // GMStoredFileUploadedDomainEvent -> Uploaded, StoredFileDownloadedDomainEvent -> Downloaded.
+    // GMStoredFileUploadedDomainEvent -> Uploaded.
     private static string ActionOf(string eventType)
     {
-        var action = eventType;
-        foreach (var prefix in (string[])["GMStoredFile", "StoredFile"])
-        {
-            if (action.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                action = action[prefix.Length..];
-                break;
-            }
-        }
-
+        var action = eventType.StartsWith("GMStoredFile", StringComparison.Ordinal)
+            ? eventType["GMStoredFile".Length..]
+            : eventType;
         return action.EndsWith("DomainEvent", StringComparison.Ordinal) ? action[..^"DomainEvent".Length] : action;
     }
 }

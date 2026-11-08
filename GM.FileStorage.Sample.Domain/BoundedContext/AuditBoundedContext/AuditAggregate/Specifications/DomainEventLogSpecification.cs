@@ -1,7 +1,5 @@
 using GM.EntityFramework.Domain.Specifications;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Specifications;
 
@@ -15,7 +13,7 @@ public class DomainEventLogSpecification : BaseSpecification<DomainEventLog>
     public DomainEventLogSpecification(
         string? aggregateType,
         string? aggregateId,
-        IReadOnlyCollection<string>? eventTypes,
+        string? eventType,
         Guid? userId,
         Guid? clientId,
         Guid? sessionId,
@@ -31,9 +29,8 @@ public class DomainEventLogSpecification : BaseSpecification<DomainEventLog>
         if (!string.IsNullOrWhiteSpace(aggregateId))
             AddCriteria(e => e.AggregateId == aggregateId);
 
-        // Any of these types: one action can be recorded under more than one name.
-        if (eventTypes is { Count: > 0 })
-            AddCriteria(e => eventTypes.Contains(e.EventType));
+        if (!string.IsNullOrWhiteSpace(eventType))
+            AddCriteria(e => e.EventType == eventType);
 
         if (userId.HasValue && userId.Value != Guid.Empty)
             AddCriteria(e => e.UserId == userId);

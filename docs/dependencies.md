@@ -262,25 +262,33 @@ classDiagram
     class GMStoredFile~TFile~ {
         <<GM.FileStorage.Domain>>
         +Guid Id
+        +string TenantId
         +string StorageKey
         +string FileName
         +string ContentType
         +long Size
         +string Checksum
         +bool IsPublic
+        +DateTime? DeletedAtUtc
+        +DateTime? VerifiedAtUtc
+        +string IntegrityProblem
         +SoftRemove()
         +RestoreAll()
+        +RecordDownload()
+        +RecordVerification(verifiedAtUtc, problem)
     }
-    class StoredFile {
-        +string TenantId
-        +Create(id, storageKey, …, tenantId)$
-    }
-    class StorageCleanup {
+    class GMStorageCleanup {
+        <<GM.FileStorage.Domain>>
         +string StorageKey
         +DateTime DueAtUtc
         +int Attempts
-        +Create(storageKey, dueAtUtc)$
         +Claim(nowUtc)
+    }
+    class StoredFile {
+        +Create(id, storageKey, …, tenantId)$
+    }
+    class StorageCleanup {
+        +Create(storageKey, dueAtUtc)$
     }
     class IUnitOfWork {
         <<interface>>
@@ -304,6 +312,7 @@ classDiagram
     }
 
     GMStoredFile <|-- StoredFile
+    GMStorageCleanup <|-- StorageCleanup
     IUnitOfWork --> IStoredFileRepository
     IUnitOfWork --> IStorageCleanupRepository
     IStoredFileRepository ..> StoredFile
@@ -312,7 +321,8 @@ classDiagram
     IDomainEventLogRepository ..> DomainEventLog
 ```
 
-`StorageCleanup` names a storage key, not a file, so it has no link to `StoredFile`. The job checks at run time
+`StoredFile` and `StorageCleanup` hold only their constructors and `Create`; everything else is in the GM.FileStorage
+bases. `StorageCleanup` names a storage key, not a file, so it has no link to `StoredFile`. The job checks at run time
 whether any file still uses the key. `DomainEventLog` (the audit bounded context) is a read-only, keyless view over
 the domain-event log; a file's history is `DomainEventLogSpecification` over it, matched by the file's aggregate
 type and id.
