@@ -145,7 +145,7 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
     }
 
     // An action's event types: GM.FileStorage's GMStoredFile{Action}DomainEvent (uploaded, deleted, …) or the sample's
-    // StoredFile{Action}DomainEvent, StoredFile{Action}DomainEvent (downloaded).
+    // StoredFile{Action}DomainEvent (downloaded).
     private static string[]? EventTypesOf(string? action)
     {
         if (string.IsNullOrWhiteSpace(action))
