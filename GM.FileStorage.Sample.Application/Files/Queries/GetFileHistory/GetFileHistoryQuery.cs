@@ -3,6 +3,7 @@ using GM.API.Application.Models;
 using GM.EntityFramework.Domain.Common;
 using GM.EntityFramework.Domain.Specifications;
 using GM.Exceptions;
+using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Specifications;

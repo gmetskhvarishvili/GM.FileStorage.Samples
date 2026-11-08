@@ -1,3 +1,4 @@
+using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
@@ -523,7 +524,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(legacyBytes)), legacyDetails.Checksum);
         Assert.Null(legacyDetails.IntegrityProblem);
         Assert.NotNull(legacyDetails.VerifiedAtUtc);
-        Assert.Contains("decryption", (await Details(altered.Id)).IntegrityProblem);
+        Assert.Contains("decrypted", (await Details(altered.Id)).IntegrityProblem);
         Assert.Contains("bytes, not the", (await Details(resized.Id)).IntegrityProblem);
         Assert.Contains("checksum", (await Details(mismatched.Id)).IntegrityProblem);
         Assert.Contains("missing", (await Details(lost.Id)).IntegrityProblem);
@@ -554,7 +555,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.DeletedAtUtc, DateTime.UtcNow.AddDays(-40)));
         }
 
-        var job = new RetentionJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
+        var job = new RetentionJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
             Microsoft.Extensions.Options.Options.Create(new RetentionOptions { DeletedFileDays = 30 }));
         var result = await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
 
@@ -806,7 +807,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.DueAtUtc, DateTime.UtcNow.AddSeconds(-1)));
         }
 
-        var job = new StorageCleanupJob(_factory.Services.GetRequiredService<IServiceScopeFactory>());
+        var job = new StorageCleanupJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>());
         await job.ExecuteAsync(new JobExecutionContext { JobName = StorageCleanupJob.JobName, FireTimeUtc = DateTimeOffset.UtcNow }, default);
     }
 
@@ -912,9 +913,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     // Checks this test's files only: the database is shared with whatever else is in it.
     private async Task RunIntegrityJobAsync()
     {
-        var job = new IntegrityCheckJob(_factory.Services.GetRequiredService<IServiceScopeFactory>(),
-            Microsoft.Extensions.Options.Options.Create(new IntegrityOptions { BatchSize = 100 }),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<IntegrityCheckJob>.Instance);
+        var job = new IntegrityCheckJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
+            Microsoft.Extensions.Options.Options.Create(new IntegrityOptions { BatchSize = 100 }));
         await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
     }
 

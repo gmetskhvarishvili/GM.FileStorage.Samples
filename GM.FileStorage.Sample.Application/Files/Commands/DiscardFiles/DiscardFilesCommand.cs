@@ -1,5 +1,6 @@
-using GM.FileStorage.Sample.Application.Common;
-using GM.FileStorage.Sample.Domain.SeedWork;
+using GM.FileStorage.Catalog;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.Mediator.Contracts;
 using System;
 using System.Collections.Generic;
@@ -19,12 +20,12 @@ public class DiscardFilesCommand : IRequest
 }
 
 /// <remarks>
-/// In one transaction the file and metadata rows are removed and each storage key is queued for cleanup, due now;
-/// then the bytes are deleted. A failed delete stays queued for the storage-cleanup job, so nothing is left behind.
+/// GM.FileStorage.Catalog's purge: in one transaction the rows are removed and each storage key is queued for cleanup,
+/// due now; then the bytes are deleted. A failed delete stays queued for the storage-cleanup job.
 /// </remarks>
-public class DiscardFilesCommandHandler(IUnitOfWork unitOfWork, IFileStorageService storage)
+public class DiscardFilesCommandHandler(StoredFileCatalog<StoredFile, StorageCleanup> catalog)
     : IRequestHandler<DiscardFilesCommand>
 {
     public Task Handle(DiscardFilesCommand request, CancellationToken cancellationToken) =>
-        StoredFilePurge.PurgeAsync(unitOfWork, storage, request.Ids, cancellationToken);
+        catalog.PurgeAsync(request.Ids, cancellationToken);
 }

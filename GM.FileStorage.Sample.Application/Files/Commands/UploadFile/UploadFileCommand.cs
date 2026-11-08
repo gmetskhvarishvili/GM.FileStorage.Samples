@@ -1,6 +1,7 @@
 using FluentValidation;
 using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
+using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
@@ -55,7 +56,7 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// </remarks>
 public class UploadFileCommandHandler(
     IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota,
-    ICurrentActor actor)
+    ICurrentActor actor, StoredFileCatalog<StoredFile, StorageCleanup> catalog)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
     public async Task<UploadedFileDto> Handle(UploadFileCommand request, CancellationToken cancellationToken)
@@ -101,12 +102,12 @@ public class UploadFileCommandHandler(
         catch (Exception ex) when (ex is FileTooLargeException or FileContentTypeNotAllowedException or FileContentTypeMismatchException
                                        or FileMalwareDetectedException)
         {
-            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
             throw new BadRequestException(ex.Message);
         }
         catch
         {
-            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
             throw;
         }
 
@@ -117,7 +118,7 @@ public class UploadFileCommandHandler(
         }
         catch (BadRequestException)
         {
-            await StorageCleanups.TryCompleteAsync(unitOfWork, storage, pending, CancellationToken.None);
+            await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
             throw;
         }
 

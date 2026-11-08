@@ -1,5 +1,6 @@
 using FluentValidation;
 using GM.EntityFramework.Domain.Common;
+using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
@@ -20,7 +21,8 @@ public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOp
     public async Task<TenantUsageDto> Handle(GetTenantUsageQuery request, CancellationToken cancellationToken)
     {
         var tenantId = actor.TenantOrShared();
-        var (used, files) = await TenantQuota.UsageAsync(unitOfWork, tenantId, cancellationToken);
+        var (used, files) = await unitOfWork.StoredFileRepository.Query(asNoTracking: true)
+            .TenantUsageAsync(tenantId, cancellationToken);
         var limit = quota.Value.BytesPerTenant;
         return new TenantUsageDto
         {

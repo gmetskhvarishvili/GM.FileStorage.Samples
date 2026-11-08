@@ -10,7 +10,7 @@ namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.
 /// Queued before an upload and removed in the transaction that records it, so an upload that fails after storing its
 /// bytes never leaves them behind for good. Deleting a file queues nothing: it keeps the bytes, so it can be restored.
 /// </summary>
-public class StorageCleanup : GMStorageCleanup, IAggregateRoot
+public class StorageCleanup : GMStorageCleanup, IStorageCleanupFactory<StorageCleanup>, IAggregateRoot
 {
     private StorageCleanup() { } // EF Core materialization
 
