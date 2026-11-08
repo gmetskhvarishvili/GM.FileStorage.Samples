@@ -1,12 +1,9 @@
-using GM.FileStorage.Sample.Application.Common;
+using GM.FileStorage.Catalog;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Scheduling;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,12 +24,13 @@ public class RetentionOptions
 }
 
 /// <summary>
-/// Purges files deleted longer ago than <see cref="RetentionOptions.DeletedFileDays"/>: a delete keeps the bytes so a
-/// restore is instant, but not forever. Their rows go and their bytes are deleted (or queued for the storage-cleanup
-/// job if that fails).
+/// Purges files deleted longer ago than <see cref="RetentionOptions.DeletedFileDays"/>, through GM.FileStorage.Catalog:
+/// a delete keeps the bytes so a restore is instant, but not forever. Their rows go and their bytes are deleted (or
+/// queued for the storage-cleanup job if that fails).
 /// </summary>
 [ScheduledJob(JobName, Cron = "0 0 * * * ?")]
-public sealed class RetentionJob(IServiceScopeFactory scopeFactory, IOptions<RetentionOptions> options) : IScheduledJob
+public sealed class RetentionJob(StoredFileCatalogRuns<StoredFile, StorageCleanup> runs, IOptions<RetentionOptions> options)
+    : IScheduledJob
 {
     public const string JobName = "retention";
 
@@ -46,22 +44,8 @@ public sealed class RetentionJob(IServiceScopeFactory scopeFactory, IOptions<Ret
         if (settings.DeletedFileDays <= 0)
             return JobExecutionResult.Success(0, "Retention is off: deleted files are kept.");
 
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        var storage = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
-
-        var cutoff = DateTime.UtcNow.AddDays(-settings.DeletedFileDays);
-        var files = unitOfWork.StoredFileRepository.Query(asNoTracking: true);
-        if (within is not null)
-            files = files.Where(within);
-        List<Guid> expired = files
-            .Where(x => x.IsDeleted && x.DeletedAtUtc != null && x.DeletedAtUtc < cutoff)
-            .OrderBy(x => x.DeletedAtUtc)
-            .Take(Math.Max(1, settings.BatchSize))
-            .Select(x => x.Id)
-            .ToList();
-
-        var purged = await StoredFilePurge.PurgeAsync(unitOfWork, storage, expired, cancellationToken);
-        return JobExecutionResult.Success(purged, $"Purged {purged} file(s) deleted more than {settings.DeletedFileDays} days ago.");
+        var run = await runs.PurgeDeletedAsync(
+            DateTime.UtcNow.AddDays(-settings.DeletedFileDays), settings.BatchSize, within, cancellationToken);
+        return StorageCleanupJob.ToJobResult(run, $"Purged {run.Processed} file(s) deleted more than {settings.DeletedFileDays} days ago.");
     }
 }

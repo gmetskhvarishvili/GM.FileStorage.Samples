@@ -1,4 +1,7 @@
 using GM.EntityFramework.Persistence;
+using GM.FileStorage.Catalog;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.AuditBoundedContext.AuditAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate.Interfaces;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Interfaces;
@@ -33,6 +36,13 @@ public static class DependencyInjection
         services.AddTransient<IStorageCleanupRepository, StorageCleanupRepository>();
         services.AddTransient<IDomainEventLogRepository, DomainEventLogRepository>();
         services.AddTransient<IUnitOfWork, UnitOfWork.UnitOfWork>();
+
+        // GM.FileStorage.Catalog: cleanup, purge, retention and integrity checks over the sample's unit of work.
+        services.AddGMFileStorageCatalog<StoredFile, StorageCleanup>(sp =>
+        {
+            var unitOfWork = sp.GetRequiredService<IUnitOfWork>();
+            return (unitOfWork, unitOfWork.StoredFileRepository, unitOfWork.StorageCleanupRepository);
+        });
 
         // Dispatches domain events raised by aggregates (GMStoredFileUploaded/Deleted/Restored, …) to their
         // in-process IDomainEventHandler<>s after ApplicationDbContext.SaveChangesAsync persists them. The sample
