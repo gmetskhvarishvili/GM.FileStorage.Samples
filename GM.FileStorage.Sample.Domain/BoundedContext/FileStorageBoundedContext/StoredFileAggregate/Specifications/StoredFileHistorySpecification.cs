@@ -17,8 +17,8 @@ public class StoredFileHistorySpecification : BaseSpecification<StoredDomainEven
         var aggregateId = storedFileId.ToString();
         AddCriteria(e => e.AggregateType == nameof(StoredFile) && e.AggregateId == aggregateId);
 
-        // "Downloaded" is the sample's StoredFileDownloadedDomainEvent; "Uploaded" GM.FileStorage's
-        // GMStoredFileUploadedDomainEvent.
+        // GM.FileStorage raises GMStoredFile{Action}DomainEvent; downloads recorded before it had one are the
+        // sample's own StoredFileDownloadedDomainEvent.
         if (!string.IsNullOrWhiteSpace(action))
         {
             var name = char.ToUpperInvariant(action.Trim()[0]) + action.Trim()[1..];

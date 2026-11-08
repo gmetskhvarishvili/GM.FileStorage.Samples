@@ -1,29 +1,12 @@
-using GM.FileStorage.Domain.FileStorage.StoredFileAggregate.Entities;
+using GM.FileStorage.Persistence.Configuration;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
-using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace GM.FileStorage.Sample.Persistence.Configuration;
 
-// The sample's own aggregate (not a GM.FileStorage one): the queue of storage objects to delete.
-public class StorageCleanupConfiguration : IEntityTypeConfiguration<StorageCleanup>
+// The cleanup-queue mapping lives in the GM.FileStorage base config; this fixes it to the sample's
+// aggregate, named by FileStorageTableNames (without GM.FileStorage's gm_ prefix).
+public class StorageCleanupConfiguration : GMStorageCleanupConfiguration<StorageCleanup>
 {
-    public void Configure(EntityTypeBuilder<StorageCleanup> builder)
-    {
-        builder.ToTable(FileStorageTableNames.StorageCleanups, FileStorageTableNames.Schemas.FileStorage);
-
-        builder.HasKey(x => x.Id);
-
-        builder.Property(x => x.StorageKey).IsRequired()
-            .HasMaxLength(GMStoredFile<StoredFile>.StorageKeyMaxLength);
-        // Claiming an entry moves DueAtUtc; as a concurrency token it makes the claim and an upload's own removal
-        // of its pending entry mutually exclusive.
-        builder.Property(x => x.DueAtUtc).IsRequired().IsConcurrencyToken();
-        builder.Property(x => x.Attempts).IsRequired();
-
-        // The cleanup job reads what's due.
-        builder.HasIndex(x => x.DueAtUtc);
-        builder.HasIndex(x => x.StorageKey);
-    }
+    protected override string Schema => FileStorageTableNames.Schemas.FileStorage;
+    protected override string Table => FileStorageTableNames.StorageCleanups;
 }

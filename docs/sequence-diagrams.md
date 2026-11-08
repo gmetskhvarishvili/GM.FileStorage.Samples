@@ -263,7 +263,7 @@ sequenceDiagram
         API-->>C: 404
     else found
         S-->>API: stream
-        API->>DB: INSERT StoredFileDownloadedDomainEvent<br/>(with the caller's identity)
+        API->>DB: INSERT GMStoredFileDownloadedDomainEvent<br/>(with the caller's identity)
         API-->>C: 200 (streamed)
     end
 ```

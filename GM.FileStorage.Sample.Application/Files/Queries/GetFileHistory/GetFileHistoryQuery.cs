@@ -140,7 +140,7 @@ public class GetFileHistoryQueryHandler(IUnitOfWork unitOfWork, ICurrentActor ac
         return request.ToPagedListDto(events, items, totalCount);
     }
 
-    // GMStoredFileUploadedDomainEvent -> Uploaded, StoredFileDownloadedDomainEvent -> Downloaded.
+    // GMStoredFileUploadedDomainEvent -> Uploaded; the older StoredFileDownloadedDomainEvent -> Downloaded.
     private static string ActionOf(string eventType)
     {
         var action = eventType;

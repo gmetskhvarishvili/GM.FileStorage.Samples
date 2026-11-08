@@ -60,7 +60,7 @@ flowchart LR
 
 | Project | Role |
 | --- | --- |
-| `GM.FileStorage.Sample.Domain` | `StoredFile` and `StorageCleanup` aggregates (`StoredFile` specialises GM.FileStorage's `GMStoredFile<TStoredFile>`, adding its tenant), repository interfaces, `StoredFileSpecification` (visibility, tenant, uploader, content type, paging), `IUnitOfWork` |
+| `GM.FileStorage.Sample.Domain` | `StoredFile` and `StorageCleanup` aggregates (only constructors and `Create`: their state and behaviour are GM.FileStorage's `GMStoredFile<TStoredFile>` and `GMStorageCleanup`), repository interfaces, `StoredFileSpecification` (visibility, tenant, uploader, content type, paging), `IUnitOfWork` |
 | `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`) — request, FluentValidation validator and GM.Mediator handler in one file; Mapster `MappingRegister` |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus `StorageCleanupJob` on GM.Scheduling |
@@ -140,8 +140,7 @@ flowchart LR
   filters by uploader (`userId`), content type and integrity problems, with GM.API paging (`X-Pagination` header).
   There's no metadata table: GM.FileStorage's name/value metadata (`GMStoredFile<TStoredFile, TStoredFileMetadata>`)
   is for labels that vary from file to file, which this sample doesn't take.
-- **Domain events.** `GMStoredFileUploaded/Deleted/RestoredDomainEvent`s, and the sample's
-  `StoredFileDownloadedDomainEvent`, are written to `domain_events.domain_events` in the same transaction, with the
+- **Domain events.** GM.FileStorage's `GMStoredFileUploaded/Downloaded/Deleted/RestoredDomainEvent`s are written to `domain_events.domain_events` in the same transaction, with the
   caller's identity, and dispatched in-process after the save. The file history reads them back.
 - **All three backends wired at once** — `FileStorage:Provider` (default `"Local"`) chooses which one is
   active, so switching disk → S3 → Azure is a **config change, not a code change**. The cloud clients are
