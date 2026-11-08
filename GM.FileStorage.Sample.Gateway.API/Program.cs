@@ -22,17 +22,8 @@ builder.Services.Configure<KestrelServerOptions>(builder.Configuration.GetSectio
 // Counter store + lock for edge rate limiting: Redis when Redis:ConnectionString is set, so several
 // gateway instances share one count per client; otherwise in-memory, which suits one instance.
 // ---------------------------------------------------------------------------------------------
-var redis = !string.IsNullOrWhiteSpace(builder.Configuration["Redis:ConnectionString"]);
-if (redis)
-{
-    builder.Services.AddGMRedisCaching(builder.Configuration);
-    builder.Services.AddGMRedisDistributedLock(builder.Configuration);
-}
-else
-{
-    builder.Services.AddGMCaching();
-    builder.Services.AddGMDistributedLock();
-}
+builder.Services.AddGMCaching(builder.Configuration);
+builder.Services.AddGMDistributedLock(builder.Configuration);
 
 // ---------------------------------------------------------------------------------------------
 // YARP reverse proxy + GM rate limiting, both from configuration (see appsettings.json): every route
@@ -46,8 +37,7 @@ else
 builder.Services.AddGMGateway(
     builder.Configuration,
     configureHttp: options => options.DefaultPartition = RateLimitPartition.Ip);
-if (redis)
-    builder.Services.AddGMRedisRateLimitStore(); // atomic counts in Redis, on the connection AddGMRedisCaching opened
+builder.Services.AddGMRateLimitStore(builder.Configuration); // atomic counts in Redis when it's configured
 
 // ---------------------------------------------------------------------------------------------
 // Health: liveness is the gateway itself; readiness also needs the files API to be up.

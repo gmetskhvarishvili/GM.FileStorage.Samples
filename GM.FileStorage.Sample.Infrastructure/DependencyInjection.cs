@@ -1,7 +1,5 @@
 using GM.FileStorage.MalwareScanner;
-using GM.Caching;
 using GM.Caching.Redis;
-using GM.DistributedLock;
 using GM.DistributedLock.Redis;
 using GM.FileStorage.Catalog.Scheduling;
 using GM.FileStorage.Sample.Application.Common;
@@ -38,12 +36,13 @@ public static class DependencyInjection
         // Bytes each tenant may store (Quotas:BytesPerTenant).
         services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
 
-        // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json), across instances when
-        // Redis is configured: the gateway limits requests, but a batch holds up to 20 files.
-        var redis = AddCoordination(services, configuration);
+        // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json): the gateway limits requests,
+        // but a batch holds up to 20 files. The cache, lock and counts are in Redis when Redis:ConnectionString is set,
+        // so every instance shares them, and in memory otherwise (one instance).
+        services.AddGMCaching(configuration);
+        services.AddGMDistributedLock(configuration);
         services.AddGMRateLimiting(configuration.GetSection("RateLimiting"));
-        if (redis)
-            services.AddGMRedisRateLimitStore();
+        services.AddGMRateLimitStore(configuration);
 
         // Readiness: /health/ready fails while the catalog database is unreachable, or ClamAV while scanning is on.
         services.AddHealthChecks()
@@ -67,33 +66,12 @@ public static class DependencyInjection
         // check also rescans what it reads, catching files that match signatures added since they were uploaded.
         services.AddGMFileStorage(configuration);
 
-        // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
-        // configured) so several workers never clean at the same time.
-        AddCoordination(services, configuration);
-        services.Configure<IntegrityCheckJobOptions>(configuration.GetSection("Integrity"));
-        services.Configure<RetentionJobOptions>(configuration.GetSection("Retention"));
+        // Each job runs once cluster-wide, guarded by the distributed lock: in memory for a single worker, Redis (when
+        // Redis:ConnectionString is set) so several workers never run one at the same time. Batch sizes and retention
+        // come from FileStorage:Catalog, which AddGMFileStorage binds.
+        services.AddGMDistributedLock(configuration);
         services.AddGMScheduling(builder => builder.AddFileStorageCatalogJobs<StoredFile, StorageCleanup>());
 
         return services;
-    }
-
-    /// <summary>
-    /// The cache and distributed lock that rate limiting and scheduling build on: Redis when
-    /// <c>Redis:ConnectionString</c> is set, so every instance shares them, otherwise in-memory (one instance). Returns
-    /// whether Redis is used.
-    /// </summary>
-    public static bool AddCoordination(IServiceCollection services, IConfiguration configuration)
-    {
-        if (string.IsNullOrWhiteSpace(configuration["Redis:ConnectionString"]))
-        {
-            services.AddGMCaching();
-            services.AddGMDistributedLock();
-            return false;
-        }
-
-        // These replace the in-memory ones GM.API registers (it looks for ConnectionStrings:Redis, not this section).
-        services.AddGMRedisCaching(configuration);
-        services.AddGMRedisDistributedLock(configuration);
-        return true;
     }
 }
