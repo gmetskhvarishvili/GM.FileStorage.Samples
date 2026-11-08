@@ -11,7 +11,7 @@ Participants used throughout:
 | **API** | `Files API`: `FilesController` → GM.Mediator → the command or query handler |
 | **DB** | PostgreSQL, through the unit of work |
 | **Storage** | `IFileStorageService`: Local, S3 or Azure Blob, wrapped by encryption when it's on |
-| **Worker** | `StorageCleanupJob`, `IntegrityCheckJob` and `RetentionJob` on GM.Scheduling |
+| **Worker** | GM.FileStorage.Catalog.Scheduling's `StorageCleanupJob`, `IntegrityCheckJob` and `RetentionJob` on GM.Scheduling |
 
 The bytes (in storage) and the rows (in Postgres) can't share a transaction. Every write is ordered so that any
 failure leaves at worst bytes nothing points at, and those are always queued in `storage_cleanups` for the

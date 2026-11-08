@@ -13,21 +13,22 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="GM.FileStorage" Version="4.1.0" />
+        <PackageReference Include="GM.FileStorage" Version="4.2.0" />
         <!-- All three backends are wired; FileStorage:Provider picks which one is active. -->
-        <PackageReference Include="GM.FileStorage.Local" Version="4.1.0" />
-        <PackageReference Include="GM.FileStorage.S3" Version="3.3.0" />
-        <PackageReference Include="GM.FileStorage.AzureBlob" Version="4.1.0" />
-        <PackageReference Include="GM.FileStorage.Encryption" Version="4.1.0" />
-        <PackageReference Include="GM.FileStorage.MalwareScanner" Version="4.1.0" />
+        <PackageReference Include="GM.FileStorage.Local" Version="4.2.0" />
+        <PackageReference Include="GM.FileStorage.S3" Version="4.2.0" />
+        <PackageReference Include="GM.FileStorage.AzureBlob" Version="4.2.0" />
+        <PackageReference Include="GM.FileStorage.Encryption" Version="4.2.0" />
+        <PackageReference Include="GM.FileStorage.MalwareScanner" Version="4.2.0" />
         <PackageReference Include="GM.HealthChecks.EntityFramework" Version="1.0.2" />
         <!-- The storage-cleanup job: GM.Scheduling, single-run per minute via an (in-memory) GM.DistributedLock. -->
         <PackageReference Include="GM.Scheduling" Version="1.0.0" />
-        <PackageReference Include="GM.DistributedLock" Version="1.0.2" />
+        <PackageReference Include="GM.FileStorage.Catalog.Scheduling" Version="4.2.0" />
+        <PackageReference Include="GM.DistributedLock" Version="1.1.0" />
         <!-- Redis variants: shared rate-limit counts and locks when several instances run (Redis:ConnectionString). -->
-        <PackageReference Include="GM.DistributedLock.Redis" Version="1.0.2" />
-        <PackageReference Include="GM.Caching" Version="1.0.1" />
-        <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
+        <PackageReference Include="GM.DistributedLock.Redis" Version="1.1.0" />
+        <PackageReference Include="GM.Caching" Version="1.1.0" />
+        <PackageReference Include="GM.Caching.Redis" Version="1.1.0" />
         <!-- Counts uploaded files per client. -->
         <PackageReference Include="GM.RateLimiting" Version="1.1.0" />
         <PackageReference Include="GM.RateLimiting.Redis" Version="1.1.0" />

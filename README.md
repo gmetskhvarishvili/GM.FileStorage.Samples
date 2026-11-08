@@ -67,7 +67,7 @@ flowchart LR
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
 | `GM.FileStorage.Sample.API` | GM.API host; `Files/FilesController` sends mediator requests and maps its `*Model`s with Mapster |
 | `GM.FileStorage.Sample.Gateway.API` | The public edge: GM.Gateway (YARP) forwarding to the API, GM.RateLimiting per IP (uploads 30/min, everything else 300/min), Swagger UI at `/`, readiness that checks the API |
-| `GM.FileStorage.Sample.Worker` | Generic host that runs `StorageCleanupJob` every minute; no HTTP surface |
+| `GM.FileStorage.Sample.Worker` | Generic host that runs GM.FileStorage.Catalog's storage-cleanup, retention and integrity-check jobs; no HTTP surface |
 | `tests/GM.FileStorage.Sample.Tests` | End-to-end tests over HTTP (`GmWebApplicationFactory<Program>`) and aggregate guards |
 
 ## What it demonstrates
@@ -206,8 +206,8 @@ always queued for deletion in the `storage_cleanups` table.
   | Step 3 fails | No row is created, and the new bytes are deleted (or left queued). |
 - **Content never changes**, so stored bytes are never overwritten or swapped out from under a row.
 - **Delete** only marks the row deleted and keeps its bytes, so nothing is queued and a restore is instant.
-- **`StorageCleanupJob`** ([GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling), every minute, in the
-  worker):
+- **The storage-cleanup job** (GM.FileStorage.Catalog.Scheduling on [GM.Scheduling](https://www.nuget.org/packages/GM.Scheduling),
+  every minute, in the worker, next to the hourly retention and 5-minute integrity-check jobs):
   - It carries out due entries, backing off on failures (1, 2, 4 … minutes, at most an hour).
   - An entry whose bytes any file row still uses (live, or deleted and restorable) is dropped, not deleted.
   - Entries are claimed with a concurrency token, so the job and an upload slower than the 15-minute

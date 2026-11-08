@@ -2,7 +2,7 @@ using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Domain.SeedWork;
-using GM.FileStorage.Sample.Infrastructure.Jobs;
+using GM.FileStorage.Catalog.Scheduling;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
 using GM.Scheduling;
@@ -555,8 +555,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.DeletedAtUtc, DateTime.UtcNow.AddDays(-40)));
         }
 
-        var job = new RetentionJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
-            Microsoft.Extensions.Options.Options.Create(new RetentionOptions { DeletedFileDays = 30 }));
+        var job = new RetentionJob<StoredFile, StorageCleanup>(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
+            Microsoft.Extensions.Options.Options.Create(new RetentionJobOptions { DeletedFileDays = 30 }));
         var result = await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
 
         // The old one is gone for good, bytes included; the recent one can still be restored.
@@ -807,8 +807,9 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.DueAtUtc, DateTime.UtcNow.AddSeconds(-1)));
         }
 
-        var job = new StorageCleanupJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>());
-        await job.ExecuteAsync(new JobExecutionContext { JobName = StorageCleanupJob.JobName, FireTimeUtc = DateTimeOffset.UtcNow }, default);
+        var job = new StorageCleanupJob<StoredFile, StorageCleanup>(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
+            Microsoft.Extensions.Options.Options.Create(new StorageCleanupJobOptions()));
+        await job.ExecuteAsync(new JobExecutionContext { JobName = SchedulingBuilderExtensions.StorageCleanupJobName, FireTimeUtc = DateTimeOffset.UtcNow }, default);
     }
 
     private static Task<UploadResponse> UploadAsync(HttpClient client, byte[] bytes, string fileName) =>
@@ -913,8 +914,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     // Checks this test's files only: the database is shared with whatever else is in it.
     private async Task RunIntegrityJobAsync()
     {
-        var job = new IntegrityCheckJob(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
-            Microsoft.Extensions.Options.Options.Create(new IntegrityOptions { BatchSize = 100 }));
+        var job = new IntegrityCheckJob<StoredFile, StorageCleanup>(_factory.Services.GetRequiredService<StoredFileCatalogRuns<StoredFile, StorageCleanup>>(),
+            Microsoft.Extensions.Options.Options.Create(new IntegrityCheckJobOptions { BatchSize = 100 }));
         await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
     }
 

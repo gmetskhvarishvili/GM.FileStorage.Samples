@@ -10,11 +10,11 @@
         <!-- YARP reverse proxy + GM edge rate limiting, driven from configuration. -->
         <PackageReference Include="GM.Gateway" Version="1.1.0" />
         <!-- In-memory counter store + lock for the rate limits (one gateway instance; use the Redis variants for several). -->
-        <PackageReference Include="GM.Caching" Version="1.0.1" />
-        <PackageReference Include="GM.DistributedLock" Version="1.0.2" />
+        <PackageReference Include="GM.Caching" Version="1.1.0" />
+        <PackageReference Include="GM.DistributedLock" Version="1.1.0" />
         <!-- Redis variants: rate-limit counts shared by every gateway instance (Redis:ConnectionString). -->
-        <PackageReference Include="GM.Caching.Redis" Version="1.0.1" />
-        <PackageReference Include="GM.DistributedLock.Redis" Version="1.0.2" />
+        <PackageReference Include="GM.Caching.Redis" Version="1.1.0" />
+        <PackageReference Include="GM.DistributedLock.Redis" Version="1.1.0" />
         <PackageReference Include="GM.RateLimiting.Redis" Version="1.1.0" />
         <!-- Liveness/readiness endpoints for the edge, including a probe of the files API. -->
         <PackageReference Include="GM.HealthChecks" Version="1.0.2" />

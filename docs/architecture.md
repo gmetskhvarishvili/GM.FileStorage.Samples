@@ -6,7 +6,7 @@ The sample runs as three processes that share one PostgreSQL catalog and one sto
 | --- | --- | --- | --- |
 | **Gateway** | `GM.FileStorage.Sample.Gateway.API` | `https://localhost:7141`, `http://localhost:5141` | The public edge: YARP reverse proxy (GM.Gateway), per-IP rate limits (GM.RateLimiting), Swagger UI |
 | **Files API** | `GM.FileStorage.Sample.API` | `https://localhost:7140` | Serves every file request, applies migrations at startup |
-| **Worker** | `GM.FileStorage.Sample.Worker` | none | Runs `StorageCleanupJob` every minute |
+| **Worker** | `GM.FileStorage.Sample.Worker` | none | Runs the catalog jobs (storage-cleanup, retention, integrity-check) |
 
 **Diagrams in this doc:** [System architecture](#system-architecture--flowchart) · [Layers](#layers--dependency-graph) · [Data model](#data-model--er-diagram)  
 All diagrams: [index](README.md)
@@ -67,7 +67,7 @@ flowchart TB
     apiHost[API]
     workerHost[Worker]
     app[Application<br/>commands · queries · validators · mapping]
-    infra[Infrastructure<br/>file storage · encryption · StorageCleanupJob · health]
+    infra[Infrastructure<br/>file storage · encryption · catalog jobs · health]
     pers[Persistence<br/>DbContext · configurations · repositories · migrations]
     domain[Domain<br/>StoredFile · StorageCleanup]
     common[Common<br/>string resources]
