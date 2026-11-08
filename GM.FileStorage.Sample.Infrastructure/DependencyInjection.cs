@@ -7,16 +7,17 @@ using GM.Caching;
 using GM.Caching.Redis;
 using GM.DistributedLock;
 using GM.DistributedLock.Redis;
+using GM.FileStorage.Catalog.Scheduling;
 using GM.FileStorage.Sample.Application.Common;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
+using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.RateLimiting;
 using GM.RateLimiting.Redis;
-using GM.FileStorage.Sample.Infrastructure.Jobs;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.HealthChecks.EntityFramework;
 using GM.Scheduling;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace GM.FileStorage.Sample.Infrastructure;
 
@@ -57,9 +58,9 @@ public static class DependencyInjection
     }
 
     /// <summary>
-    /// The worker: file storage plus the scheduled jobs. <see cref="StorageCleanupJob"/> deletes whatever bytes uploads
-    /// leave unreferenced; <see cref="IntegrityCheckJob"/> reads stored files back against the catalog;
-    /// <see cref="RetentionJob"/> purges files deleted long ago. The integrity check reads file contents, so the worker
+    /// The worker: file storage plus GM.FileStorage.Catalog's scheduled jobs. storage-cleanup deletes whatever bytes
+    /// uploads leave unreferenced; integrity-check reads stored files back against the catalog; retention purges files
+    /// deleted long ago. The integrity check reads file contents, so the worker
     /// needs the same encryption settings and keys as the API, and must see the same storage (FileStorage settings and
     /// root).
     /// </summary>
@@ -76,9 +77,9 @@ public static class DependencyInjection
         // One run per minute cluster-wide, guarded by the distributed lock: in-memory for a single worker, Redis (when
         // configured) so several workers never clean at the same time.
         AddCoordination(services, configuration);
-        services.Configure<IntegrityOptions>(configuration.GetSection("Integrity"));
-        services.Configure<RetentionOptions>(configuration.GetSection("Retention"));
-        services.AddGMScheduling(builder => builder.ScanAssemblies(typeof(StorageCleanupJob).Assembly));
+        services.Configure<IntegrityCheckJobOptions>(configuration.GetSection("Integrity"));
+        services.Configure<RetentionJobOptions>(configuration.GetSection("Retention"));
+        services.AddGMScheduling(builder => builder.AddFileStorageCatalogJobs<StoredFile, StorageCleanup>());
 
         return services;
     }
@@ -97,10 +98,7 @@ public static class DependencyInjection
             return false;
         }
 
-        // GM.API registers in-memory ones first (it looks for ConnectionStrings:Redis, not this section), and these
-        // registrations only fill gaps, so remove those before adding Redis.
-        services.RemoveAll<ICacheService>();
-        services.RemoveAll<IDistributedLock>();
+        // These replace the in-memory ones GM.API registers (it looks for ConnectionStrings:Redis, not this section).
         services.AddGMRedisCaching(configuration);
         services.AddGMRedisDistributedLock(configuration);
         return true;
