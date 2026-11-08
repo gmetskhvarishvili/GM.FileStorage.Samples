@@ -30,9 +30,9 @@ public class StoredFileDetailsModel : AuditableModel
     /// <summary>The tenant the file belongs to (the uploader's <c>X-Tenant-Id</c>, or <c>public</c>).</summary>
     [Display(ResourceType = typeof(StringResource), Name = "TenantId")]
     public string? TenantId { get; set; }
-    /// <summary>The uploader's user id (<c>X-User-Id</c>); null when none was sent.</summary>
+    /// <summary>Who uploaded the file: their user id (<c>X-User-Id</c>), kept in the audit column; null when none was sent.</summary>
     [Display(ResourceType = typeof(StringResource), Name = "UserId")]
-    public Guid? UploadedBy { get; set; }
+    public Guid? CreatedBy { get; set; }
     /// <summary>When the stored bytes were last checked against this record (UTC); null until the first check.</summary>
     public DateTime? VerifiedAtUtc { get; set; }
     /// <summary>What that check found wrong (missing, wrong size, checksum mismatch); null when the bytes matched.</summary>

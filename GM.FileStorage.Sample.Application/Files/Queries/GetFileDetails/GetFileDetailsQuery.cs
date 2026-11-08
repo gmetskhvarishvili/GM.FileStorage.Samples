@@ -64,8 +64,8 @@ public class StoredFileDetailsDto : AuditableDto
     public DateTime UploadedAtUtc { get; set; }
     public string? TenantId { get; set; }
 
-    /// <summary>The uploader's user id (<c>X-User-Id</c>); null when none was sent.</summary>
-    public Guid? UploadedBy { get; set; }
+    /// <summary>Who uploaded the file: their user id (<c>X-User-Id</c>), kept in the audit column; null when none was sent.</summary>
+    public Guid? CreatedBy { get; set; }
 
     /// <summary>When the stored bytes were last checked against this record (UTC).</summary>
     public DateTime? VerifiedAtUtc { get; set; }

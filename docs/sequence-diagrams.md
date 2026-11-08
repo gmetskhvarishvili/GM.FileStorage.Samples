@@ -209,7 +209,7 @@ sequenceDiagram
     end
     API->>DB: SELECT page … ORDER BY … LIMIT/OFFSET
     DB-->>API: rows
-    API->>API: map: created_by → uploadedBy (the storage key stays inside)
+    API->>API: map to the response (the storage key stays inside)
     API-->>API: 200 [files] + X-Pagination
 ```
 

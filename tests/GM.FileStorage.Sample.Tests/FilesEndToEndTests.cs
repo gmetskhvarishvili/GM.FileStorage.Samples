@@ -136,7 +136,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var listJson = await client.GetStringAsync("/api/v1/files");
         Assert.DoesNotContain("storageKey", listJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("isPublic", listJson, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal((_tenantId, Guid.Parse(_userId)), (listed.TenantId, listed.UploadedBy));
+        Assert.Equal((_tenantId, Guid.Parse(_userId)), (listed.TenantId, listed.CreatedBy));
         Assert.Single(await ListAsync(client, $"userId={_userId}"));
         Assert.Empty(await ListAsync(client, $"userId={Guid.NewGuid()}"));
 
@@ -269,7 +269,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var nobody = _factory.CreateClient();
         var shared = await UploadAsync(nobody, bytes, "shared.pdf");
         var sharedDetails = await nobody.GetFromJsonAsync<StoredFileResponse>($"/api/v1/files/{shared.Id}");
-        Assert.Equal(("public", (Guid?)null), (sharedDetails!.TenantId, sharedDetails.UploadedBy));
+        Assert.Equal(("public", (Guid?)null), (sharedDetails!.TenantId, sharedDetails.CreatedBy));
         Assert.Equal($"{_tenantId}/public/{DateTime.UtcNow:yyyy/MM/dd}/{shared.Id:N}", await StoragePathAsync(shared.Id));
         Assert.Single(await ListAsync(nobody, $"id={shared.Id}"));
         Assert.Equal(HttpStatusCode.OK,
@@ -933,5 +933,5 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         long Size,
         bool IsDeleted,
         string? TenantId,
-        Guid? UploadedBy);
+        Guid? CreatedBy);
 }
