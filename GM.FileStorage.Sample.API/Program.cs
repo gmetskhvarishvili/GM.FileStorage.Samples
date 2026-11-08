@@ -3,7 +3,6 @@ using GM.FileStorage.Sample.API.Files;
 using GM.FileStorage.Sample.Infrastructure;
 using GM.FileStorage.Sample.Persistence;
 using GM.FileStorage.Sample.Persistence.Context;
-using GM.Idempotency;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,10 +25,6 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 // Counts uploaded files per client (RateLimiting:Policies:uploaded-files).
 builder.Services.AddScoped<UploadQuota>();
-
-// GM.API replays a POST that repeats its Idempotency-Key. The key is locked while the first request runs, and an
-// upload can run for minutes, so Idempotency:LockExpiry outlasts it: a retry meanwhile gets 409, never a second upload.
-builder.Services.Configure<IdempotencyOptions>(builder.Configuration.GetSection("Idempotency"));
 
 var app = builder.Build();
 
