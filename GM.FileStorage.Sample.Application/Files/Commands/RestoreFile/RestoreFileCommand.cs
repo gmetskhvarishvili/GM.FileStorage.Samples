@@ -1,6 +1,7 @@
 using FluentValidation;
 using GM.EntityFramework.Domain.Common;
 using GM.Exceptions;
+using GM.FileStorage.Abstractions;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;

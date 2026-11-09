@@ -1,3 +1,4 @@
+using GM.FileStorage.Abstractions;
 using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
