@@ -11,7 +11,6 @@ using GM.FileStorage.Sample.Application.Files.Queries.DownloadFile;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileDetails;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFileHistory;
 using GM.FileStorage.Sample.Application.Files.Queries.GetFilesList;
-using GM.FileStorage.Sample.Application.Files.Queries.GetTenantUsage;
 using Mapster;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -130,22 +129,6 @@ public class FilesController(UploadQuota quota) : BaseController
         var response = await Mediator.Send(command, cancellationToken);
         var result = response.Adapt<IEnumerable<UploadFileResultModel>>();
         return Ok(result);
-    }
-
-    /// <summary>
-    /// Get Storage Usage
-    /// </summary>
-    /// <remarks>
-    /// How much storage the caller's tenant uses: its files, deleted ones included until retention purges them.
-    /// </remarks>
-    /// <param name="cancellationToken"></param>
-    [HttpGet("files/usage", Name = nameof(GetStorageUsage))]
-    [ProducesResponseType(typeof(TenantUsageModel), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetStorageUsage(
-        CancellationToken cancellationToken)
-    {
-        var response = await Mediator.Send(new GetTenantUsageQuery(), cancellationToken);
-        return Ok(response.Adapt<TenantUsageModel>());
     }
 
     /// <summary>

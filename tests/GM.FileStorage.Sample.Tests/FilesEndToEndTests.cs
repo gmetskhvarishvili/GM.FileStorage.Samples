@@ -250,11 +250,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 ours");
         var ours = await UploadAsync(client, bytes, "ours.pdf");
 
-        // Another tenant sees nothing of ours: not in its list or usage, and every id is a 404, as if unknown.
+        // Another tenant sees nothing of ours: not in its list, and every id is a 404, as if unknown.
         using var other = _factory.CreateClient();
         other.DefaultRequestHeaders.Add("X-Tenant-Id", Guid.NewGuid().ToString());
         Assert.Empty(await ListAsync(other, ""));
-        Assert.Equal(0, (await other.GetFromJsonAsync<UsageResponse>("/api/v1/files/usage"))!.FileCount);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}?visibility=All")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/content")).StatusCode);
@@ -572,25 +571,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Usage_counts_the_tenants_files_deleted_ones_included()
-    {
-        if (!_infraReady) return;
-
-        using var client = Client(_factory);
-        byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
-        async Task<UsageResponse> Usage() => (await client.GetFromJsonAsync<UsageResponse>($"/api/v1/files/usage"))!;
-
-        var first = await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Pdf(20), "f.pdf", "application/pdf");
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        var firstId = (await first.Content.ReadFromJsonAsync<UploadResponse>())!.Id;
-        Assert.Equal((20L, 1), (await Usage()) is var u ? (u.UsedBytes, u.FileCount) : default);
-
-        // A deleted file still takes space until retention purges it.
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{firstId}")).StatusCode);
-        Assert.Equal((20L, 1), (await Usage()) is var d ? (d.UsedBytes, d.FileCount) : default);
-    }
-
-    [Fact]
     public async Task With_malware_scanning_on_and_no_scanner_uploads_are_refused_unscanned()
     {
         if (!_infraReady) return;
@@ -901,7 +881,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
     }
 
-    private sealed record UsageResponse(string TenantId, long UsedBytes, int FileCount);
 
     private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
 

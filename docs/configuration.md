@@ -41,8 +41,8 @@ flowchart LR
 | `FileStorage:S3:AccessKey` / `SecretKey`, `FileStorage:AzureBlob:ConnectionString` | | ✓ | ✓ | appsecrets.json |
 | `FileStorage:Encryption:Enabled` (on), `ActiveKeyId` and `Keys` (the master keys; the worker's integrity check decrypts to verify) | | ✓ | ✓ | appsettings.json (on) / appsecrets.json (keys) |
 | `FileStorage:MalwareScanner:Enabled` (off; on, uploads are scanned and the integrity check rescans), `FileStorage:MalwareScanner:ClamAV:Host` / `Port` (`localhost:3310`) | | ✓ | ✓ | appsettings.json, or the environment (docker-compose.scanning.yml) |
-| `Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
-| `Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `Retention:BatchSize` | | | ✓ | appsettings.json |
+| `FileStorage:Catalog:Integrity:BatchSize` (files checked per run, every 5 minutes) | | | ✓ | appsettings.json |
+| `FileStorage:Catalog:Retention:DeletedFileDays` (30; 0 keeps deleted files forever), `FileStorage:Catalog:Retention:BatchSize` | | | ✓ | appsettings.json |
 
 ¹ The worker only deletes objects, so of these it needs only `Provider` and the provider's own settings.
 
