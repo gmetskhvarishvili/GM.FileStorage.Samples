@@ -2,7 +2,6 @@ using GM.API.Startup;
 using GM.FileStorage.Sample.Infrastructure;
 using GM.FileStorage.Sample.Persistence;
 using GM.FileStorage.Sample.Persistence.Context;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,7 +17,7 @@ var builder = ProgramExtension.CreateGMBuilder(args);
 // are described, never read or logged), localization, health checks, and Swagger's file fields for streamed uploads.
 builder.Services.ConfigureGMServices(builder.Configuration, "DefaultCors", "SwaggerDocOptions");
 
-// The catalog (stored files + their metadata rows) in PostgreSQL, and the storage backends + key strategy.
+// The catalog (the stored files) in PostgreSQL, and the storage backends + key strategy.
 builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
 

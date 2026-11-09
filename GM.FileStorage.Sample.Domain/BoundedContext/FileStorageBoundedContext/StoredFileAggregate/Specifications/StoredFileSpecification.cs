@@ -1,7 +1,5 @@
 using GM.EntityFramework.Domain.Specifications;
-using GM.FileStorage.Sample.Domain.SeedWork;
 using System;
-using System.Linq;
 
 namespace GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate.Specifications;
 
@@ -31,8 +29,6 @@ public class StoredFileSpecification : BaseSpecification<StoredFile>
             AddCriteria(f => f.IntegrityProblem != null);
         else if (integrityProblem == false)
             AddCriteria(f => f.IntegrityProblem == null);
-
-        // The list returns each file's metadata alongside it.
 
         ApplyListQuery(dateRange, paging, ordering);
     }

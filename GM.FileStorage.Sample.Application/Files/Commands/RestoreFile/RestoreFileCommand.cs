@@ -6,15 +6,14 @@ using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Application.Files.Commands.RestoreFile;
 
 /// <summary>
-/// Brings a deleted file back: its row is restored (active and visible again) with the content, metadata and
-/// storage key it had when it was deleted. Delete keeps the bytes, so nothing has to be re-uploaded.
+/// Brings a deleted file back: its row is restored (active and visible again) with the content and storage key
+/// it had when it was deleted. Delete keeps the bytes, so nothing has to be re-uploaded.
 /// </summary>
 public class RestoreFileCommand : IRequest
 {

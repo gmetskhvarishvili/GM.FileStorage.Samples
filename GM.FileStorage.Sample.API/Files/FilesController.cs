@@ -16,7 +16,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,11 +23,10 @@ namespace GM.FileStorage.Sample.API.Files;
 
 /// <summary>
 /// Files Controller — upload (one file or a batch), list, inspect, download, delete and restore files, and see who
-/// did what to one. A
-/// file's content never changes after upload; new content is a new file. A file is
-/// identified by one GUID (its id), and that is all callers see of it: its bytes are stored in the storage provider
-/// behind <c>IFileStorageService</c>, under a folder path from <c>FileStorage:KeyTemplate</c> built on the id; every upload is also recorded in the catalog (a stored-file row plus its
-/// searchable metadata), which is what the list and details endpoints read.
+/// did what to one. A file's content never changes after upload; new content is a new file. A file is identified by
+/// one GUID (its id), and that is all callers see of it: its bytes are stored in the storage provider behind
+/// <c>IFileStorageService</c>, under a folder path from <c>FileStorage:KeyTemplate</c> built on the id, and every
+/// upload is also recorded in the catalog database, which is what the list and details endpoints read.
 /// <para>
 /// Every file belongs to the caller's tenant, taken from <c>X-Tenant-Id</c> (GM's actor headers, which the gateway
 /// sets from the caller's GM.Identity token), and another tenant's file answers 404. Without the header, the caller works in a shared space
@@ -45,14 +43,14 @@ public class FilesController : BaseController
     /// </summary>
     /// <remarks>
     /// Multipart <c>file</c>: exactly one (for several, use <c>POST files/batch</c>). Creates a new file identified by
-    /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c> built on it. The caller's tenant (<c>X-Tenant-Id</c>, else <c>public</c>) and user (<c>X-User-Id</c>, else
-    /// <c>anon</c>) are recorded as the file's searchable metadata; the file is only ever visible to that tenant.
+    /// a GUID; its bytes are stored under a folder path from <c>FileStorage:KeyTemplate</c> built on it. The file belongs
+    /// to the caller's tenant (<c>X-Tenant-Id</c>, else <c>public</c>) and is only ever visible to it; the caller's
+    /// <c>X-User-Id</c>, if sent, is recorded as its <c>createdBy</c>.
     /// <para>
     /// The file is streamed from the request straight into storage, never buffered: a file over
     /// <c>FileStorage:MaxFileSize</c> is cut off as soon as it passes the limit.
     /// </para>
     /// </remarks>
-    /// <param name="cancellationToken"></param>
     /// <returns>The stored file's id, name, size, checksum and content type</returns>
     [HttpPost("files", Name = nameof(UploadFile))]
     [Consumes("multipart/form-data")]
@@ -109,7 +107,6 @@ public class FilesController : BaseController
     /// doesn't stop the others. More than 20 files refuses the whole batch, keeping nothing. The whole request is
     /// still capped at the server's body limit (60 MB).
     /// </remarks>
-    /// <param name="cancellationToken"></param>
     /// <returns>One result per file, in the order sent</returns>
     [HttpPost("files/batch", Name = nameof(UploadFiles))]
     [Consumes("multipart/form-data")]
@@ -133,7 +130,6 @@ public class FilesController : BaseController
     /// Get Files List
     /// </summary>
     /// <param name="request">Files list filters (user, content type, …) and paging; always the caller's tenant</param>
-    /// <param name="cancellationToken"></param>
     /// <returns>IEnumerable of stored files</returns>
     [HttpGet("files", Name = nameof(GetFilesList))]
     [ProducesResponseType(typeof(IEnumerable<StoredFileModel>), StatusCodes.Status200OK)]
@@ -154,8 +150,7 @@ public class FilesController : BaseController
     /// </summary>
     /// <param name="id">The file's id</param>
     /// <param name="request">Visibility scope (query string); defaults to visible-only. Widen it to inspect a deleted file.</param>
-    /// <param name="cancellationToken"></param>
-    /// <returns>Stored file details — storage key and metadata included</returns>
+    /// <returns>The stored file's details</returns>
     [HttpGet("files/{id:guid}", Name = nameof(GetFileDetails))]
     [ProducesResponseType(typeof(StoredFileDetailsModel), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
@@ -181,7 +176,6 @@ public class FilesController : BaseController
     /// </remarks>
     /// <param name="id">The file's id</param>
     /// <param name="request">Filters, ordering and paging</param>
-    /// <param name="cancellationToken"></param>
     [HttpGet("files/{id:guid}/history", Name = nameof(GetFileHistory))]
     [ProducesResponseType(typeof(IEnumerable<FileHistoryEntryModel>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
@@ -207,7 +201,6 @@ public class FilesController : BaseController
     /// answer is always the whole file.
     /// </remarks>
     /// <param name="id">The file's id</param>
-    /// <param name="cancellationToken"></param>
     [HttpGet("files/{id:guid}/content", Name = nameof(DownloadFile))]
     [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
@@ -227,7 +220,6 @@ public class FilesController : BaseController
     /// back as it was.
     /// </remarks>
     /// <param name="id">The file's id</param>
-    /// <param name="cancellationToken"></param>
     [HttpDelete("files/{id:guid}", Name = nameof(DeleteFile))]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
@@ -242,9 +234,8 @@ public class FilesController : BaseController
     /// <summary>
     /// Restore File
     /// </summary>
-    /// <remarks>Brings a deleted file back with the content and metadata it had; nothing is re-uploaded.</remarks>
+    /// <remarks>Brings a deleted file back with the content it had; nothing is re-uploaded.</remarks>
     /// <param name="id">The file's id</param>
-    /// <param name="cancellationToken"></param>
     [HttpPost("files/{id:guid}/restore", Name = nameof(RestoreFile))]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]

@@ -1,4 +1,3 @@
-using FluentValidation;
 using GM.API.Application.Models;
 using GM.EntityFramework.Domain.Common;
 using GM.EntityFramework.Domain.Specifications;
