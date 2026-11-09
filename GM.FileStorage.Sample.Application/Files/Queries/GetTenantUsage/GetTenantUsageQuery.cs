@@ -4,18 +4,17 @@ using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
-using Microsoft.Extensions.Options;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace GM.FileStorage.Sample.Application.Files.Queries.GetTenantUsage;
 
-/// <summary>How much of its storage quota the caller's tenant uses.</summary>
+/// <summary>How much storage the caller's tenant uses.</summary>
 public class GetTenantUsageQuery : IRequest<TenantUsageDto>;
 
 public class GetTenantUsageQueryValidator : AbstractValidator<GetTenantUsageQuery>;
 
-public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOptions> quota, ICurrentActor actor)
+public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, ICurrentActor actor)
     : IRequestHandler<GetTenantUsageQuery, TenantUsageDto>
 {
     public async Task<TenantUsageDto> Handle(GetTenantUsageQuery request, CancellationToken cancellationToken)
@@ -23,12 +22,10 @@ public class GetTenantUsageQueryHandler(IUnitOfWork unitOfWork, IOptions<QuotaOp
         var tenantId = actor.TenantOrShared();
         var (used, files) = await unitOfWork.StoredFileRepository.Query(asNoTracking: true)
             .TenantUsageAsync(tenantId, cancellationToken);
-        var limit = quota.Value.BytesPerTenant;
         return new TenantUsageDto
         {
             TenantId = tenantId,
             UsedBytes = used,
-            QuotaBytes = limit > 0 ? limit : null,
             FileCount = files,
         };
     }
@@ -41,9 +38,6 @@ public class TenantUsageDto
 
     /// <summary>Bytes stored: files, deleted ones until purged.</summary>
     public long UsedBytes { get; set; }
-
-    /// <summary>The tenant's quota in bytes; null when unlimited.</summary>
-    public long? QuotaBytes { get; set; }
 
     /// <summary>Files counted, deleted ones included.</summary>
     public int FileCount { get; set; }

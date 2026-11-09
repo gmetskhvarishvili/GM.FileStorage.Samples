@@ -136,8 +136,7 @@ public class FilesController(UploadQuota quota) : BaseController
     /// Get Storage Usage
     /// </summary>
     /// <remarks>
-    /// How much of its storage quota (<c>Quotas:BytesPerTenant</c>) the caller's tenant uses: its files, deleted ones included until
-    /// retention purges them. Uploads that would go past the quota get a 400.
+    /// How much storage the caller's tenant uses: its files, deleted ones included until retention purges them.
     /// </remarks>
     /// <param name="cancellationToken"></param>
     [HttpGet("files/usage", Name = nameof(GetStorageUsage))]

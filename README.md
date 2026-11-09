@@ -115,7 +115,6 @@ flowchart LR
   after its upload is flagged. ClamAV is free; it needs about 1.5 GB of RAM. See [Running in Docker](#running-in-docker).
 - **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
   `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
-- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged.
   An upload that would go past it gets a `400`, and its bytes are deleted.
   `GET /api/v1/files/usage` shows the usage.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
@@ -252,7 +251,7 @@ they're uploaded again.
 | `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
 | `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
 | `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
-| `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
+| `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes and file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the whole file (streamed); recorded in its history |
 | `GET` | `/api/v1/files/{id}/history?action=&userId=&clientId=&sessionId=&ipAddress=&createdAtFrom=&createdAtTo=&orderBy=&currentPage=&pageSize=&lastKeyValue=` | What happened to the file and who did it (uploaded, downloaded, deleted, restored): filtered, ordered by any of its fields (newest first by default), paged by number or by key with GM.API paging (`X-Pagination` header) |
@@ -411,7 +410,7 @@ per file, a refused file not stopping the rest), the single endpoint refusing se
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, a `Range` header
 ignored,
 the upload rules, the cleanup job, integrity checks flagging damaged or
-missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
+missing bytes and recording missing checksums, retention purging long-deleted files, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once,
 a file's history recording who downloaded, deleted and restored it (paged by number and by key, filtered, ordered),
 and

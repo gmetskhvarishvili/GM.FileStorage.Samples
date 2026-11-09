@@ -8,7 +8,6 @@ using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.Stor
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using GM.FileStorage.MalwareScanner;
-using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -55,7 +54,7 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// </list>
 /// </remarks>
 public class UploadFileCommandHandler(
-    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy, IOptions<QuotaOptions> quota,
+    IUnitOfWork unitOfWork, IFileStorageService storage, IFileKeyStrategy keyStrategy,
     ICurrentActor actor, StoredFileCatalog<StoredFile, StorageCleanup> catalog)
     : IRequestHandler<UploadFileCommand, UploadedFileDto>
 {
@@ -76,10 +75,6 @@ public class UploadFileCommandHandler(
         // rejected by the upload, so the {category} folder can't lie.
         var id = Guid.NewGuid();
         var storageKey = keyStrategy.GenerateKey(new FileKeyContext(request.FileName!, keyValues) { ContentType = request.ContentType, Id = id });
-
-        // A tenant already at its storage quota is refused before any bytes move (the size isn't known until the
-        // upload has streamed, so it's checked again then).
-        await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, 0, cancellationToken);
 
         // 1. Queue the new storage key before any bytes exist, so a crash after the upload can't strand them.
         var pending = StorageCleanup.Create(storageKey, DateTime.UtcNow.Add(StorageCleanup.PendingUploadGracePeriod));
@@ -115,17 +110,6 @@ public class UploadFileCommandHandler(
                 "Malware scanning is on, but the scanner didn't answer. Nothing was kept; try again shortly.", ScanRetryAfter);
         }
         catch
-        {
-            await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
-            throw;
-        }
-
-        // Now the size is known: over the quota, the bytes go.
-        try
-        {
-            await TenantQuota.EnsureRoomAsync(unitOfWork, quota.Value, tenantId, stored.Size, cancellationToken);
-        }
-        catch (BadRequestException)
         {
             await catalog.TryCompleteCleanupAsync(pending, CancellationToken.None);
             throw;

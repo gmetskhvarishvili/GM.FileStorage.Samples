@@ -33,9 +33,6 @@ public static class DependencyInjection
         // Generated storage keys follow FileStorage:KeyTemplate ({meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}).
         services.AddGMFileStorage(configuration);
 
-        // Bytes each tenant may store (Quotas:BytesPerTenant).
-        services.Configure<QuotaOptions>(configuration.GetSection("Quotas"));
-
         // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json): the gateway limits requests,
         // but a batch holds up to 20 files. The cache, lock and counts are in Redis when Redis:ConnectionString is set,
         // so every instance shares them, and in memory otherwise (one instance).
