@@ -89,13 +89,9 @@ flowchart LR
 - **Refusing a request after storing part of it.** Streaming means a second file (on the single endpoint) or a 21st
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
-- **Files counted per client, not requests.** Every uploaded file takes a permit from
-  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single and batch uploads alike: a batch of
-  20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
-  limits requests on top.
 - **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
   runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
-  nothing and counts no file. That covers a single upload and a batch. Only
+  nothing. That covers a single upload and a batch. Only
   successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
   while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
   the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the

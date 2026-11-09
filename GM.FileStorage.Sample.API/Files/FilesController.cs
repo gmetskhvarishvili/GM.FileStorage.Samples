@@ -38,7 +38,7 @@ namespace GM.FileStorage.Sample.API.Files;
 [ApiController]
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}")]
-public class FilesController(UploadQuota quota) : BaseController
+public class FilesController : BaseController
 {
     /// <summary>
     /// Upload File
@@ -65,7 +65,6 @@ public class FilesController(UploadQuota quota) : BaseController
         await using var files = MultipartFiles.ReadAsync(Request, cancellationToken).GetAsyncEnumerator(cancellationToken);
         if (!await files.MoveNextAsync())
             throw new BadRequestException("No file was sent.");
-        await quota.TakeAsync(cancellationToken);
 
         var command = new UploadFileCommand
         {
@@ -122,8 +121,7 @@ public class FilesController(UploadQuota quota) : BaseController
     {
         var command = new UploadFilesCommand
         {
-            // Each file takes an upload permit as it arrives; past the limit the batch is refused whole.
-            Files = quota.CountAsync(MultipartFiles.ReadAsync(Request, cancellationToken), cancellationToken),
+            Files = AsUploadItems(MultipartFiles.ReadAsync(Request, cancellationToken)),
         };
 
         var response = await Mediator.Send(command, cancellationToken);
@@ -256,5 +254,12 @@ public class FilesController(UploadQuota quota) : BaseController
     {
         await Mediator.Send(new RestoreFileCommand { Id = id }, cancellationToken);
         return NoContent();
+    }
+
+    // GM.API's streamed parts as the batch command's items, read as the command stores them.
+    private static async IAsyncEnumerable<UploadFilesItem> AsUploadItems(IAsyncEnumerable<MultipartFile> files)
+    {
+        await foreach (var file in files)
+            yield return new UploadFilesItem { Content = file.Content, FileName = file.FileName, ContentType = file.ContentType };
     }
 }

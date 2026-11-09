@@ -31,7 +31,7 @@ flowchart LR
 | Setting | Gateway | API | Worker | Where |
 | --- | :-: | :-: | :-: | --- |
 | `ReverseProxy:*` (routes, cluster address) | ✓ | | | appsettings.json |
-| `RateLimiting:Policies:*`: the gateway's per-request limits, the API's `uploaded-files` (30 files a minute per client) | ✓ | ✓ | | appsettings.json |
+| `RateLimiting:Policies:*`: the gateway's per-request limits | ✓ | | | appsettings.json |
 | `Redis:ConnectionString` (share limits, counts, idempotency keys and the job lock across instances; unset: in memory). | ✓ | ✓ | ✓ | environment / appsecrets.json |
 | `Idempotency:LockExpiry` (10 minutes: how long a request holds its `Idempotency-Key`, longer than an upload takes) | | ✓ | | appsettings.json |
 | `Kestrel:Limits:MaxRequestBodySize` (60 MB) | ✓ | ✓ | | appsettings.json |

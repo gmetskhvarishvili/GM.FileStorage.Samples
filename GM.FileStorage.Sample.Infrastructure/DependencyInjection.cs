@@ -5,8 +5,6 @@ using GM.FileStorage.Catalog.Scheduling;
 using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.RateLimiting;
-using GM.RateLimiting.Redis;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.HealthChecks.EntityFramework;
 using GM.Scheduling;
@@ -33,13 +31,10 @@ public static class DependencyInjection
         // Generated storage keys follow FileStorage:KeyTemplate ({meta:tenantId}/{date:yyyy}/{date:MM}/{date:dd}/{id}).
         services.AddGMFileStorage(configuration);
 
-        // Uploaded files are counted per client (RateLimiting:Policies in appsettings.json): the gateway limits requests,
-        // but a batch holds up to 20 files. The cache, lock and counts are in Redis when Redis:ConnectionString is set,
-        // so every instance shares them, and in memory otherwise (one instance).
+        // The cache and lock GM.API's idempotency builds on: in Redis when Redis:ConnectionString is set, so every
+        // instance shares them, and in memory otherwise (one instance). Requests are rate-limited by the gateway.
         services.AddGMCaching(configuration);
         services.AddGMDistributedLock(configuration);
-        services.AddGMRateLimiting(configuration.GetSection("RateLimiting"));
-        services.AddGMRateLimitStore(configuration);
 
         // Readiness: /health/ready fails while the catalog database is unreachable, or ClamAV while scanning is on.
         services.AddHealthChecks()
