@@ -44,11 +44,6 @@ public static class DependencyInjection
             return (unitOfWork, unitOfWork.StoredFileRepository, unitOfWork.StorageCleanupRepository);
         });
 
-        // Dispatches domain events raised by aggregates (GMStoredFileUploaded/Deleted/Restored, …) to their
-        // in-process IDomainEventHandler<>s after ApplicationDbContext.SaveChangesAsync persists them. The sample
-        // registers no handlers; the events still land in the durable domain_events log.
-        services.AddDomainEventDispatcher();
-
         return services;
     }
 }
