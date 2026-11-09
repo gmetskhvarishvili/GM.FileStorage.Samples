@@ -2,7 +2,6 @@ using GM.FileStorage.MalwareScanner;
 using GM.Caching.Redis;
 using GM.DistributedLock.Redis;
 using GM.FileStorage.Catalog.Scheduling;
-using GM.FileStorage.Sample.Application.Common;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
 using GM.FileStorage.Sample.Persistence.Context;

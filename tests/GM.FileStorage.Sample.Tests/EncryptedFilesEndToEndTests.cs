@@ -1,5 +1,4 @@
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;
 using Microsoft.EntityFrameworkCore;

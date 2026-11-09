@@ -1,7 +1,6 @@
 using GM.FileStorage.Catalog;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StorageCleanupAggregate;
 using GM.FileStorage.Sample.Domain.BoundedContext.FileStorageBoundedContext.StoredFileAggregate;
-using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.FileStorage.Catalog.Scheduling;
 using GM.FileStorage.Sample.Persistence.Context;
 using GM.Testing.AspNetCore;

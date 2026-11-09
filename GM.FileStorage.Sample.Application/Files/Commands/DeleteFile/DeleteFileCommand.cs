@@ -6,7 +6,6 @@ using GM.FileStorage.Sample.Common.Resources;
 using GM.FileStorage.Sample.Domain.SeedWork;
 using GM.Mediator.Contracts;
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 

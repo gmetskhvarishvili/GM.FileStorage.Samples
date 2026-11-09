@@ -1,7 +1,6 @@
 using GM.API.Models;
 using GM.FileStorage.Sample.Common.Resources;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
 namespace GM.FileStorage.Sample.API.Files;

@@ -49,7 +49,7 @@ public class UploadFileCommandValidator : AbstractValidator<UploadFileCommand>
 /// <list type="number">
 /// <item>Queue the new storage key for cleanup (due after a grace period) and save — before any bytes exist.</item>
 /// <item>Upload under that key.</item>
-/// <item>In one transaction: create the file row and its metadata rows, and drop the pending entry. If this fails,
+/// <item>In one transaction: create the file row and drop the pending entry. If this fails,
 /// the new bytes are deleted (or left to the job).</item>
 /// </list>
 /// </remarks>
