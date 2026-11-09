@@ -61,7 +61,7 @@ flowchart LR
 | Project | Role |
 | --- | --- |
 | `GM.FileStorage.Sample.Domain` | `StoredFile` and `StorageCleanup` aggregates (only constructors and `Create`: their state and behaviour are GM.FileStorage's `GMStoredFile<TStoredFile>` and `GMStorageCleanup`), repository interfaces, `StoredFileSpecification` (visibility, tenant, uploader, content type, paging), the read-only `DomainEventLog` audit view with `DomainEventLogSpecification` (by aggregate, event type and actor: a file's history), `IUnitOfWork` |
-| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`) — request, FluentValidation validator and GM.Mediator handler in one file; DTOs are mapped by name with Mapster (GM.API formats the audit dates); cleanup, purge and tenant usage come from GM.FileStorage.Catalog |
+| `GM.FileStorage.Sample.Application` | Commands and queries (`Files/Commands/UploadFile`, `DeleteFile`, `RestoreFile`; `Files/Queries/GetFilesList`, `GetFileDetails`, `DownloadFile`) — request, FluentValidation validator and GM.Mediator handler in one file; DTOs are mapped by name with Mapster (GM.API formats the audit dates); cleanup and purge come from GM.FileStorage.Catalog |
 | `GM.FileStorage.Sample.Persistence` | `ApplicationDbContext` (GM.EntityFramework `GenericDbContext` + domain-event dispatch), the GM.FileStorage configurations mapped to `file_storage.stored_files` (`FileStorageTableNames`: the library's names without the `gm_` prefix), repositories, unit of work, migrations, `AddPersistence` (Npgsql + snake_case + actor auditing) |
 | `GM.FileStorage.Sample.Infrastructure` | `AddInfrastructure` (API): GM.FileStorage + the Local/S3/AzureBlob providers, encryption, the database readiness check. `AddWorkerInfrastructure` (worker): the providers plus the storage-cleanup, retention and integrity-check jobs on GM.Scheduling, which run GM.FileStorage.Catalog's batches |
 | `GM.FileStorage.Sample.Common` | `StringResource` (display names, error parts) and the `GMExceptionsResource` messages GM.Exceptions formats |
@@ -89,13 +89,9 @@ flowchart LR
 - **Refusing a request after storing part of it.** Streaming means a second file (on the single endpoint) or a 21st
   (in a batch) is only seen after earlier ones are stored. Those are then discarded — rows removed, bytes queued
   for cleanup and deleted — and the request gets a 400 with nothing kept.
-- **Files counted per client, not requests.** Every uploaded file takes a permit from
-  `RateLimiting:Policies:uploaded-files` (30 a minute per client), single and batch uploads alike: a batch of
-  20 counts as 20. A batch that runs out mid-way is refused whole with `429` + `Retry-After`. The gateway still
-  limits requests on top.
 - **Safe retries.** A `POST` sent with an `Idempotency-Key` header (any unique value, such as a new GUID per upload)
   runs once: a retry with the same key gets the first response back, with `Idempotency-Replayed: true`, and stores
-  nothing and counts no file. That covers a single upload and a batch. Only
+  nothing. That covers a single upload and a batch. Only
   successful responses are kept (24 hours), so a refused upload can be fixed and resent under the same key. A retry
   while the first request is still running gets `409`. The key alone decides: a different file under a used key gets
   the first file's answer. This is GM.API's built-in idempotency (GM.Idempotency), the same as GM.Identity's; the
@@ -114,10 +110,7 @@ flowchart LR
   `Retry-After`, and readiness reports it. The integrity check rescans files too, so one matching a signature added
   after its upload is flagged. ClamAV is free; it needs about 1.5 GB of RAM. See [Running in Docker](#running-in-docker).
 - **Retention.** A delete keeps the bytes so a restore is instant, but not forever: files deleted more than
-  `Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
-- **Storage quotas.** `Quotas:BytesPerTenant` (1 GB) caps what a tenant stores, deleted files included until purged.
-  An upload that would go past it gets a `400`, and its bytes are deleted.
-  `GET /api/v1/files/usage` shows the usage.
+  `FileStorage:Catalog:Retention:DeletedFileDays` (30) ago are purged by the worker, rows and bytes.
 - **Content never changes.** There is no replace endpoint: once uploaded, a file's bytes stay as they were.
   New content is a new upload with a new id.
 - **Soft delete, easy restore.** `DeleteFile` only marks the row deleted (hidden from list, details and
@@ -129,7 +122,7 @@ flowchart LR
 - **Whole files only.** A download is always the whole file, streamed; `Range` headers are ignored.
 - **Every file belongs to a tenant.** The caller's tenant and user come from GM's actor headers, `X-Tenant-Id`
   and `X-User-Id`, through `ICurrentActor`, as in every GM service. Uploads are recorded under them, the list
-  and usage only ever show the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
+  only ever shows the caller's tenant, and another tenant's file is a `404` on every endpoint, as if it
   didn't exist. Both are optional: without `X-Tenant-Id` the caller works in a shared space, `public`, that no
   tenant sees into (a tenant id is a GUID, so none can claim it); without `X-User-Id` the uploader is left empty. The
   gateway doesn't sign callers in: it passes the headers through as sent, so it's not a security boundary on its own.
@@ -252,7 +245,6 @@ they're uploaded again.
 | `POST` | `/api/v1/files` | Upload one multipart `file`, streamed (several → 400, nothing kept); returns its `id` (a GUID), name, content type, size, checksum |
 | `POST` | `/api/v1/files/batch` | Upload 1–20 multipart `files`, streamed; returns one result per file, in order: the stored file, or why it wasn't stored (21+ → 400, nothing kept) |
 | `GET` | `/api/v1/files?userId=&contentType=&integrityProblem=&currentPage=&pageSize=` | Paged list of the tenant's files, uploader and last integrity check included |
-| `GET` | `/api/v1/files/usage` | The tenant's storage use: used bytes, quota, file count |
 | `GET` | `/api/v1/files/{id}` | File details (`?visibility=All` includes deleted files) |
 | `GET` | `/api/v1/files/{id}/content` | Download the whole file (streamed); recorded in its history |
 | `GET` | `/api/v1/files/{id}/history?action=&userId=&clientId=&sessionId=&ipAddress=&createdAtFrom=&createdAtTo=&orderBy=&currentPage=&pageSize=&lastKeyValue=` | What happened to the file and who did it (uploaded, downloaded, deleted, restored): filtered, ordered by any of its fields (newest first by default), paged by number or by key with GM.API paging (`X-Pagination` header) |
@@ -363,7 +355,7 @@ or Azure Blob, set `FileStorage:Provider` to `"S3"` or `"AzureBlob"`; no code ch
 [`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, through the gateway. Open the
 folder in Bruno, pick the **Local** environment (gateway, API, tenant and user), and run **Files** in order: Upload
 File saves the file's id for the rest. It uploads, retries with the same `Idempotency-Key`
-(replayed), sends a batch and a refused type, then lists, reads, downloads, checks usage, tries the file as
+(replayed), sends a batch and a refused type, then lists, reads, downloads, tries the file as
 another tenant (404), deletes, restores, and reads the file's history. **Health** checks both services. Every request
 has tests, so the whole run doubles as a smoke test:
 
@@ -411,7 +403,7 @@ per file, a refused file not stopping the rest), the single endpoint refusing se
 3 MB upload streamed intact, an oversized upload refused after reading little more than the limit, a `Range` header
 ignored,
 the upload rules, the cleanup job, integrity checks flagging damaged or
-missing bytes and recording missing checksums, retention purging long-deleted files, the storage quota, the
+missing bytes and recording missing checksums, retention purging long-deleted files, the
 per-client file count refusing a batch whole, one tenant never seeing or touching another's files, retries with an `Idempotency-Key` storing and counting a file once,
 a file's history recording who downloaded, deleted and restored it (paged by number and by key, filtered, ordered),
 and

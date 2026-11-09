@@ -497,7 +497,7 @@ sequenceDiagram
     end
 ```
 
-`Retention:DeletedFileDays` set to 0 keeps deleted files forever.
+`FileStorage:Catalog:Retention:DeletedFileDays` set to 0 keeps deleted files forever.
 
 ## Health checks — sequence
 

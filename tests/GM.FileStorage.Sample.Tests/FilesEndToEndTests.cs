@@ -250,11 +250,10 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var bytes = Encoding.UTF8.GetBytes("%PDF-1.7 ours");
         var ours = await UploadAsync(client, bytes, "ours.pdf");
 
-        // Another tenant sees nothing of ours: not in its list or usage, and every id is a 404, as if unknown.
+        // Another tenant sees nothing of ours: not in its list, and every id is a 404, as if unknown.
         using var other = _factory.CreateClient();
         other.DefaultRequestHeaders.Add("X-Tenant-Id", Guid.NewGuid().ToString());
         Assert.Empty(await ListAsync(other, ""));
-        Assert.Equal(0, (await other.GetFromJsonAsync<UsageResponse>("/api/v1/files/usage"))!.FileCount);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}?visibility=All")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/v1/files/{ours.Id}/content")).StatusCode);
@@ -405,51 +404,11 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Uploaded_files_are_counted_per_client_not_per_request()
-    {
-        if (!_infraReady) return;
-
-        // Same storage root and key template as the other tests, with a limit of 3 files a minute.
-        await using var factory = new GmWebApplicationFactory<Program>()
-            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
-            .WithConfig("FileStorage:Provider", "Local")
-            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
-            .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", Layout)
-            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
-        using var client = Client(factory);
-        var batch = $"/api/v1/files/batch";
-        (string, string, byte[]) Pdf(string name) => (name, "application/pdf", Encoding.UTF8.GetBytes("%PDF-1.7 " + name));
-
-        // Two files: allowed.
-        Assert.Equal(HttpStatusCode.OK, (await SendFilesAsync(client, batch, Pdf("a.pdf"), Pdf("b.pdf"))).StatusCode);
-
-        // Two more would make four: the batch is refused whole, the file it got to store included.
-        var refused = await SendFilesAsync(client, batch, Pdf("c.pdf"), Pdf("d.pdf"));
-        Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
-        Assert.True(refused.Headers.Contains("Retry-After"));
-        Assert.Equal(["a.pdf", "b.pdf"], (await ListAsync(client, "")).Select(f => f.FileName).Order());
-        Assert.Equal(2, StoredObjects().Length);
-
-        // The third permit went to c.pdf before d.pdf was refused, so a single upload is out too.
-        Assert.Equal(HttpStatusCode.TooManyRequests,
-            (await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Encoding.UTF8.GetBytes("%PDF-1.7 e"), "e.pdf", "application/pdf")).StatusCode);
-    }
-
-    [Fact]
     public async Task Retried_uploads_with_the_same_idempotency_key_are_stored_once()
     {
         if (!_infraReady) return;
 
-        // A limit of 3 files a minute shows that a replayed retry doesn't count as another file.
-        await using var factory = new GmWebApplicationFactory<Program>()
-            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
-            .WithConfig("FileStorage:Provider", "Local")
-            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
-            .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", Layout)
-            .WithConfig("RateLimiting:Policies:uploaded-files:PermitLimit", "3");
-        using var client = Client(factory);
+        using var client = Client(_factory);
         var single = $"/api/v1/files";
         async Task<HttpResponseMessage> WithKey(string key, Func<HttpClient, Task<HttpResponseMessage>> send)
         {
@@ -480,9 +439,8 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         var second = await ExpectOkAsync(WithKey(fixedKey, c => Pdf(c, "b.pdf")));
         Assert.NotEqual(first.Id, second.Id);
 
-        // Two files stored and one refused: three permits used, however many retries.
+        // Two files stored, however many retries.
         Assert.Equal(2, (await ListAsync(client, "")).Count);
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await Pdf(client, "d.pdf")).StatusCode);
     }
 
     [Fact]
@@ -569,43 +527,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         using var after = _factory.Services.CreateScope();
         Assert.Null(await after.ServiceProvider.GetRequiredService<ApplicationDbContext>()
             .Set<StoredFile>().Where(x => x.Id == recent.Id).Select(x => x.DeletedAtUtc).SingleAsync());
-    }
-
-    [Fact]
-    public async Task Uploads_stay_within_the_tenants_storage_quota()
-    {
-        if (!_infraReady) return;
-
-        // Same storage root and key template as the other tests, with a 40-byte quota per tenant.
-        await using var factory = new GmWebApplicationFactory<Program>()
-            // Local disk and no malware scanner (CI has no ClamAV), whatever this machine's settings choose.
-            .WithConfig("FileStorage:Provider", "Local")
-            .WithConfig("FileStorage:MalwareScanner:Enabled", "false")
-            .WithConfig("FileStorage:Local:RootPath", _root)
-            .WithConfig("FileStorage:KeyTemplate", Layout)
-            .WithConfig("Quotas:BytesPerTenant", "40");
-        using var client = Client(factory);
-        byte[] Pdf(int length) => [.. "%PDF-1.7 "u8, .. new byte[length - 9]];
-        async Task<HttpResponseMessage> Upload(int length) =>
-            await SendFileAsync(client, HttpMethod.Post, $"/api/v1/files", Pdf(length), "f.pdf", "application/pdf");
-        async Task<UsageResponse> Usage() => (await client.GetFromJsonAsync<UsageResponse>($"/api/v1/files/usage"))!;
-
-        var first = await Upload(20);
-        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        var firstId = (await first.Content.ReadFromJsonAsync<UploadResponse>())!.Id;
-
-        // 20 + 25 > 40: refused once its size is known, and its bytes are deleted.
-        var over = await Upload(25);
-        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
-        Assert.Contains("quota", await over.Content.ReadAsStringAsync());
-        Assert.Single(StoredObjects());
-        Assert.Empty(await CleanupEntriesAsync());
-        Assert.Equal((20L, 40L, 1), (await Usage()) is var u ? (u.UsedBytes, u.QuotaBytes!.Value, u.FileCount) : default);
-
-        // A deleted file still takes space until retention purges it.
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/files/{firstId}")).StatusCode);
-        Assert.Equal(20, (await Usage()).UsedBytes);
-        Assert.Equal(HttpStatusCode.BadRequest, (await Upload(25)).StatusCode);
     }
 
     [Fact]
@@ -919,7 +840,6 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         await job.RunAsync(f => f.StorageKey.StartsWith(_tenantId), default);
     }
 
-    private sealed record UsageResponse(string TenantId, long UsedBytes, long? QuotaBytes, int FileCount);
 
     private sealed record DetailsResponse(Guid Id, string? Checksum, DateTime? VerifiedAtUtc, string? IntegrityProblem);
 
