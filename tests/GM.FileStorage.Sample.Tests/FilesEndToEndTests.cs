@@ -333,7 +333,7 @@ public sealed class FilesEndToEndTests : IAsyncLifetime
         {
             var response = await client.GetAsync($"{historyUrl}?{query}");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var pagination = JsonDocument.Parse(response.Headers.GetValues("X-Pagination").Single()).RootElement;
+            var pagination = JsonElement.Parse(response.Headers.GetValues("X-Pagination").Single());
             return ((await response.Content.ReadFromJsonAsync<List<HistoryEntryResponse>>())!, pagination);
         }
 
