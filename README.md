@@ -50,11 +50,17 @@ flowchart LR
 | [Sequence diagrams](docs/sequence-diagrams.md) | Startup, the gateway, every endpoint, encryption, cleanup, health, Swagger |
 | [Configuration](docs/configuration.md) | Where each setting and secret comes from |
 
-> Every `GM.FileStorage*` reference here is pinned to **3.0.0** (the packages release in lockstep). 2.0.0 added
+> Every `GM.FileStorage*` reference here is pinned to **6.0.0** (the packages release in lockstep). 2.0.0 added
 > encryption at rest, key templates and upload rules, and removed `GMStoredFile.Replace`: a file's content
 > never changes after upload. 2.1.0 signs local-disk presigned links, 2.2.0 records checksums measured after
 > upload, 3.0.0 removes `GMStoredFile.Key` (a file is its id), 3.1.0 adds a stored file without metadata, and
-> 3.2.0 seals an encrypted file's name, type and metadata so storage learns nothing about it.
+> 3.2.0 seals an encrypted file's name, type and metadata so storage learns nothing about it. 3.3.0 adds
+> ClamAV malware scanning (`GM.FileStorage.MalwareScanner`). 4.0.0 moves stored-file state and the
+> storage-cleanup queue into the library and removes ranged downloads; 4.1.0 adds `GM.FileStorage.Catalog`
+> and 4.2.0 runs its jobs on GM.Scheduling (`GM.FileStorage.Catalog.Scheduling`); 4.3.0 and 4.4.0 let
+> `AddGMFileStorage` register the configured packages and bind the jobs' settings. 5.0.0 registers the
+> catalog over a DbContext in one call and removes `TenantUsageAsync`, and 6.0.0 moves the packages' types
+> into namespaces that match their folders.
 
 ## Layers
 
